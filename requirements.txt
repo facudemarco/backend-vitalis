@@ -1,0 +1,12 @@
+fastapi[standard]
+uvicorn
+pydantic
+sqlalchemy
+pymysql
+mysql
+python-dotenv
+python-multipart
+aiosmtplib
+python-jose
+pydantic[email]
+requests
