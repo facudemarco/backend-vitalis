@@ -11,7 +11,8 @@ import shutil
 
 router = APIRouter(prefix="/studies", tags=["Studies"])
 
-STUDIES_DIR = "/home/iweb/vitalis/data/studies"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STUDIES_DIR = os.path.join(PROJECT_ROOT, "studies")
 os.makedirs(STUDIES_DIR, exist_ok=True)
 
 def _format_study(row) -> dict:
