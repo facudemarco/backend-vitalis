@@ -10,3 +10,7 @@ aiosmtplib
 python-jose
 pydantic[email]
 requests
+matplotlib
+openpyxl
+dataclasses
+bcrypt
