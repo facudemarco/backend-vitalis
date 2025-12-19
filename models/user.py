@@ -64,6 +64,22 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     
 
+class UserSchema(BaseModel):
+    """Pydantic model for user response - use instead of ORM User"""
+    id: str
+    email: str
+    hashed_password: str
+    first_name: str
+    last_name: str
+    dni: str
+    date_of_birth: str
+    phone: str
+    role: str
+    is_active: bool
+    
+    class Config:
+        from_attributes = True
+
 class UserCreate(BaseModel):
     id: str
     email: str

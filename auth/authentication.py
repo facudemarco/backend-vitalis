@@ -6,7 +6,7 @@ from typing import Optional, Callable
 from sqlalchemy import text
 from Database.getConnection import engine
 
-from models.user import User
+from models.user import User, UserSchema
 
 SECRET_KEY = "MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis"
 ALGORITHM = "HS256"
@@ -79,7 +79,7 @@ def get_current_user(request: Request):
             detail="User not found",
         )
 
-    return User(
+    return UserSchema(
         id=row["id"],
         email=row["email"],
         hashed_password=row["hashed_password"],
@@ -92,7 +92,7 @@ def get_current_user(request: Request):
         is_active=row["is_active"],
     )
 
-def require_active_user(current_user: User = Depends(get_current_user)) -> User:
+def require_active_user(current_user: UserSchema = Depends(get_current_user)) -> UserSchema:
     """Verifica que el usuario esté activo"""
     if not current_user.is_active:
         raise HTTPException(
@@ -103,7 +103,7 @@ def require_active_user(current_user: User = Depends(get_current_user)) -> User:
 
 def require_roles(*allowed_roles: str) -> Callable:
     """Decorador que requiere uno de los roles especificados"""
-    async def check_role(current_user: User = Depends(require_active_user)) -> User:
+    async def check_role(current_user: UserSchema = Depends(require_active_user)) -> UserSchema:
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
