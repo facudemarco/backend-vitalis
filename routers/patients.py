@@ -69,7 +69,7 @@ async def get_patients(
                 raise HTTPException(status_code=403, detail="You can only view your own company patients")
             
             # Obtener el company_id real del owner
-            company_row = db.query(text("SELECT id FROM companies WHERE owner_user_id = :user_id")).params(user_id=current_user.id).mappings().first()
+            company_row = db.execute(text("SELECT id FROM companies WHERE owner_user_id = :user_id"), {"user_id": current_user.id}).mappings().first()
             if company_row:
                 params["company_id"] = company_row["id"]
                 query = text(f"SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id FROM patients WHERE company_id = :company_id")
@@ -89,7 +89,7 @@ async def get_patients(
         else:
             raise HTTPException(status_code=403, detail="Only admin, company owners, or professionals can list patients")
         
-        rows = db.query(query).params(**params).mappings().all()
+        rows = db.execute(query, params).mappings().all()
         patients = [_format_patient(row) for row in rows]
         return {"patients": patients, "total": len(patients)}
     
@@ -98,6 +98,22 @@ async def get_patients(
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail="Error fetching patients")
+    finally:
+        db.close()
+
+@router.get("/getPatients", tags=["Patients"])
+async def getPatients(current_user: User = Depends(require_active_user)):
+    """Obtener todos los pacientes"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        rows = db.execute(text("SELECT * FROM patients")).mappings().all()
+        return [_format_patient(row) for row in rows]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error fetching patients" + str(e))
     finally:
         db.close()
 
@@ -115,11 +131,11 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        row = db.query(text("""
+        row = db.execute(text("""
             SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id
             FROM patients
             WHERE id = :id
-        """)).params(id=patient_id).mappings().first()
+        """), {"id": patient_id}).mappings().first()
         
         if not row:
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -137,7 +153,7 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
                 raise HTTPException(status_code=403, detail="You can only view your own patient data")
         elif current_user.role == "company":
             # Company owner ve pacientes de su empresa
-            company_row = db.query(text("SELECT id FROM companies WHERE owner_user_id = :user_id")).params(user_id=current_user.id).mappings().first()
+            company_row = db.execute(text("SELECT id FROM companies WHERE owner_user_id = :user_id"), {"user_id": current_user.id}).mappings().first()
             if not company_row or row["company_id"] != company_row["id"]:
                 raise HTTPException(status_code=403, detail="You can only view patients from your own company")
         else:
@@ -150,3 +166,4 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
         raise HTTPException(status_code=500, detail="Error fetching patient")
     finally:
         db.close()
+

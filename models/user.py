@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, Integer, String, UUID, Boolean
 from sqlalchemy.ext.declarative import declarative_base
@@ -71,9 +71,9 @@ class UserSchema(BaseModel):
     hashed_password: str
     first_name: str
     last_name: str
-    dni: str
-    date_of_birth: str
-    phone: str
+    dni: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    phone: Optional[str] = None
     role: str
     is_active: bool
     

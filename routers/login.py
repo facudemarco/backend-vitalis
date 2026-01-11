@@ -5,7 +5,7 @@ from fastapi import FastAPI, Depends, HTTPException, APIRouter, Response, Cookie
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 from auth.authentication import oauth2_scheme, get_current_user, create_access_token, verify_token, require_roles, require_active_user
-from models.user import User, UserCreate, UserUpdate
+from models.user import User, UserCreate, UserUpdate, UserSchema
 from Database.getConnection import getConnectionForLogin, getConnection
 from Database.users import get_user_by_email, authenticate_user, resolve_profile_ids, build_token_payload
 from sqlalchemy import JSON, text
@@ -24,7 +24,7 @@ async def login(response: Response, email: str = Form(...), password: str = Form
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect email or password")
 
-    profile = resolve_profile_ids(user.id, user.role)
+    profile = resolve_profile_ids(str(user.id), str(user.role))
     token_payload = build_token_payload(user, profile)
     access_token = create_access_token(data=token_payload)
 
@@ -34,7 +34,7 @@ async def login(response: Response, email: str = Form(...), password: str = Form
         httponly=True,
         secure=True,       
         samesite="lax",    
-        max_age=60 * 60,   
+        max_age=60 * 60 * 24 * 7,   
         path="/",
     )
 
@@ -55,8 +55,8 @@ async def logout(response: Response):
     return {"detail": "Logged out successfully"}
 
 @router.get("/me", tags=["login"])
-async def read_current_user(current_user: User = Depends(require_active_user)):
-    profile = resolve_profile_ids(current_user.id, current_user.role)
+async def read_current_user(current_user: UserSchema = Depends(require_active_user)):
+    profile = resolve_profile_ids(str(current_user.id), str(current_user.role))
     return {
         "user": {
             "id": current_user.id,
@@ -98,8 +98,9 @@ async def register_patient(
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_password = hash_password(password)
+    user_id = str(uuid.uuid4())
     new_user = User(
-        id=str(uuid.uuid4()),
+        id=user_id,
         email=email,
         hashed_password=hashed_password,
         first_name=first_name,
@@ -118,13 +119,41 @@ async def register_patient(
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
+
+        # Create patient profile
+        patient_id = str(uuid.uuid4())
+        
+        # Handle DNI conversion (str to int safely)
+        dni_int = 0
+        if dni and dni.isdigit():
+            dni_int = int(dni)
+
+        db.execute(
+            text("""
+                INSERT INTO patients (id, user_id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id)
+                VALUES (:id, :user_id, :first_name, :last_name, :dni, :date_of_birth, :phone, :address, :social_security, :company_id)
+            """),
+            {
+                "id": patient_id,
+                "user_id": new_user.id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "dni": dni_int,
+                "date_of_birth": date_of_birth,
+                "phone": phone,
+                "address": "",
+                "social_security": "",
+                "company_id": None
+            }
+        )
+        db.commit()
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error creating user")
     finally:
         db.close()
 
-    return {"detail": "Patient registered successfully", "user_id": new_user.id}
+    return {"detail": "Patient registered successfully", "user_id": user_id, "patient_id": patient_id}
 
 @router.post("/auth/register/company", tags=["Register"])
 async def register_company(
@@ -155,6 +184,8 @@ async def register_company(
         first_name=first_name,
         last_name=last_name,
         phone=phone,
+        dni="",
+        date_of_birth="",
         role="company",
         is_active=True,
     )
@@ -201,10 +232,9 @@ async def register_professional(
     speciality: str = Form(...),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
-    phone: str = Form(default=""),
-    current_user: User = Depends(require_roles("admin"))
+    phone: str = Form(default="")
 ):
-    """Registra un nuevo profesional (solo admin)"""
+    """Registra un nuevo profesional"""
     existing_user = get_user_by_email(email)
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -220,6 +250,8 @@ async def register_professional(
         first_name=first_name,
         last_name=last_name,
         phone=phone,
+        dni="",
+        date_of_birth="",
         role="professional",
         is_active=True,
     )
@@ -260,21 +292,24 @@ async def register_admin(
     email: str = Form(...),
     password: str = Form(...),
     first_name: str = Form(default=""),
-    last_name: str = Form(default=""),
-    current_user: User = Depends(require_roles("admin"))
+    last_name: str = Form(default="")
 ):
     existing_user = get_user_by_email(email)
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_password = hash_password(password)
-    
+    user_id = str(uuid.uuid4())
+
     new_user = User(
-        id=str(uuid.uuid4()),
+        id=user_id,
         email=email,
         hashed_password=hashed_password,
         first_name=first_name,
         last_name=last_name,
+        dni="",
+        date_of_birth="",
+        phone="",
         role="admin",
         is_active=True,
     )
@@ -288,14 +323,14 @@ async def register_admin(
         db.refresh(new_user)
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error creating admin")
+        raise HTTPException(status_code=500, detail="Error creating admin, " + str(e))
     finally:
         db.close()
 
-    return {"detail": "Admin registered successfully", "user_id": new_user.id}
+    return {"detail": "Admin registered successfully", "user_id": user_id}
 
 @router.post("/change-password", tags=["Register"])
-async def change_password(current_user: User = Depends(require_active_user), old_password: str = Form(...), new_password: str = Form(...)):
+async def change_password(current_user: UserSchema = Depends(require_active_user), old_password: str = Form(...), new_password: str = Form(...)):
     user = authenticate_user(current_user.email, old_password)
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect old password")
