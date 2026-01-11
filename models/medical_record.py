@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Any
 import json
+from datetime import datetime
 
 # -------------------------------------------------------------------
 # Tablas individuales
@@ -337,7 +338,7 @@ class MedicalRecordSignatures(BaseModel):
     medical_record_id: Optional[str] = None
     url: Optional[str] = None
     professional_id: Optional[str] = None
-    created_at: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 class MedicalRecordSkinExam(BaseModel):
     id: Optional[str] = None
