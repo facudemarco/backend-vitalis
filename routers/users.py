@@ -203,11 +203,11 @@ async def update_user(
     finally:
         db.close()
 
-# ==================== DELETE USER (SOFT DELETE) ====================
+# ==================== DELETE USER ====================
 
 @router.delete("/{user_id}", tags=["Admin - Users"])
 async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
-    """Soft delete: marca usuario como inactivo (solo admin)"""
+    """Delete: marca usuario como inactivo (solo admin)"""
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
@@ -217,17 +217,23 @@ async def delete_user(user_id: str, current_user: User = Depends(require_roles("
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        user.is_active = False
+        # Eliminar registros dependientes
+        db.execute(text("DELETE FROM patients WHERE user_id = :uid"), {"uid": user_id})
+        db.execute(text("DELETE FROM professionals WHERE user_id = :uid"), {"uid": user_id})
+        db.execute(text("DELETE FROM companies WHERE owner_user_id = :uid"), {"uid": user_id})
+        
+        db.delete(user)
         db.commit()
         
         return {
-            "detail": "User soft deleted successfully (is_active=false)",
+            "detail": "User deleted successfully",
             "user_id": user_id
         }
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error deleting user")
+        raise HTTPException(status_code=500, detail="Error deleting user" + str(e))
     finally:
         db.close()
+        

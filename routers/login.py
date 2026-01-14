@@ -196,6 +196,7 @@ async def register_company(
     
     try:
         db.add(new_user)
+        db.flush()
         
         # Crear registro en tabla companies
         db.execute(
@@ -218,7 +219,7 @@ async def register_company(
         db.commit()
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error creating company")
+        raise HTTPException(status_code=500, detail="Error creating company" + str(e))
     finally:
         db.close()
 
@@ -262,6 +263,7 @@ async def register_professional(
     
     try:
         db.add(new_user)
+        db.flush()
         
         # Crear registro en tabla professionals
         db.execute(

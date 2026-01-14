@@ -12,7 +12,10 @@ import shutil
 router = APIRouter(prefix="/studies", tags=["Studies"])
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STUDIES_DIR = os.path.join(PROJECT_ROOT, "studies")
+if os.name == 'posix':
+    STUDIES_DIR = "/home/iweb/vitalis/data/studies/"
+else:
+    STUDIES_DIR = os.path.join(PROJECT_ROOT, "studies")
 os.makedirs(STUDIES_DIR, exist_ok=True)
 
 def _format_study(row) -> dict:
@@ -24,7 +27,8 @@ def _format_study(row) -> dict:
         "study_type": row["study_type"],
         "title": row["title"],
         "description": row["description"],
-        "status": row["status"],
+        "description": row["description"],
+        # "status": row["status"], # Removed as column doesn't exist
         "created_at": row.get("created_at"),
     }
 
@@ -60,7 +64,7 @@ async def create_study(
     study_type: str = Form(default=""),
     title: str = Form(default=""),
     description: str = Form(default=""),
-    status: str = Form(default="pending"),
+    # status: str = Form(default="pending"), # Removed
     current_user: User = Depends(require_roles("professional", "admin"))
 ):
     db = getConnectionForLogin()
@@ -90,8 +94,8 @@ async def create_study(
         
         db.execute(text("""
             INSERT INTO studies
-            (id, patient_id, professional_id, created_by_user_id, study_type, title, description, status, created_at)
-            VALUES (:id, :patient_id, :professional_id, :created_by_user_id, :study_type, :title, :description, :status, :created_at)
+            (id, patient_id, professional_id, created_by_user_id, study_type, title, description, created_at)
+            VALUES (:id, :patient_id, :professional_id, :created_by_user_id, :study_type, :title, :description, :created_at)
         """), {
             "id": study_id,
             "patient_id": patient_id,
@@ -100,7 +104,7 @@ async def create_study(
             "study_type": study_type,
             "title": title,
             "description": description,
-            "status": status,
+            # "status": status,
             "created_at": now,
         })
         
@@ -115,7 +119,7 @@ async def create_study(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error creating study")
+        raise HTTPException(status_code=500, detail="Error creating study" + str(e))
     finally:
         db.close()
 
@@ -137,7 +141,7 @@ async def get_studies(
         rows = db.execute(
             text("""
                 SELECT id, patient_id, professional_id, created_by_user_id, study_type, 
-                       title, description, status, created_at
+                       title, description, created_at
                 FROM studies
                 WHERE patient_id = :pid
                 ORDER BY created_at DESC
@@ -165,7 +169,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
         row = db.execute(
             text("""
                 SELECT id, patient_id, professional_id, created_by_user_id, study_type, 
-                       title, description, status, created_at
+                       title, description, created_at
                 FROM studies
                 WHERE id = :sid
             """),
@@ -213,7 +217,7 @@ async def update_study(
     study_type: str = Form(default=None),
     title: str = Form(default=None),
     description: str = Form(default=None),
-    status: str = Form(default=None),
+    # status: str = Form(default=None),
     current_user: User = Depends(require_roles("professional", "admin"))
 ):
     db = getConnectionForLogin()
@@ -244,9 +248,9 @@ async def update_study(
         if description is not None:
             updates.append("description = :description")
             params["description"] = description
-        if status is not None:
-            updates.append("status = :status")
-            params["status"] = status
+        # if status is not None:
+        #     updates.append("status = :status")
+        #     params["status"] = status
         
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")

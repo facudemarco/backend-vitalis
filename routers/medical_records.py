@@ -31,6 +31,8 @@ router = APIRouter(prefix="/medical-records", tags=["Medical Records"])
 SIGNATURES_DIR_ENV = os.getenv("SIGNATURES_DIR")
 if SIGNATURES_DIR_ENV:
     SIGNATURES_DIR = Path(SIGNATURES_DIR_ENV)
+elif os.name == 'posix':
+    SIGNATURES_DIR = Path("/home/iweb/vitalis/data/signatures/")
 else:
     # Default relative to this file: ./../../signatures
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -471,6 +473,7 @@ async def update_medical_record(
                 
                 if existing:
                     # Update
+                    field_value["medical_record_id"] = record_id # Force correct ID
                     rec_id = existing["id"]
                     cols = list(field_value.keys())
                     set_clause = ", ".join([f"{col} = :{col}" for col in cols])

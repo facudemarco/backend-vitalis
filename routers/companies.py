@@ -34,17 +34,17 @@ async def get_companies(current_user: User = Depends(require_active_user)):
     try:
         if current_user.role == "admin":
             # Admin ve todas
-            rows = db.query(text("""
+            rows = db.execute(text("""
                 SELECT id, name, responsable_name, cuit, email, phone, address, owner_user_id
                 FROM companies
             """)).mappings().all()
         elif current_user.role == "company":
             # Owner ve solo su empresa
-            rows = db.query(text("""
+            rows = db.execute(text("""
                 SELECT id, name, responsable_name, cuit, email, phone, address, owner_user_id
                 FROM companies
                 WHERE owner_user_id = :user_id
-            """)).params(user_id=current_user.id).mappings().all()
+            """), {"user_id": current_user.id}).mappings().all()
         else:
             raise HTTPException(status_code=403, detail="Only admin or company owners can list companies")
         
@@ -53,7 +53,7 @@ async def get_companies(current_user: User = Depends(require_active_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error fetching companies")
+        raise HTTPException(status_code=500, detail="Error fetching companies" + str(e))
     finally:
         db.close()
 
@@ -65,11 +65,11 @@ async def get_company_by_id(company_id: str, current_user: User = Depends(requir
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        row = db.query(text("""
+        row = db.execute(text("""
             SELECT id, name, responsable_name, cuit, email, phone, address, owner_user_id
             FROM companies
             WHERE id = :id
-        """)).params(id=company_id).mappings().first()
+        """), {"id": company_id}).mappings().first()
         
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
@@ -114,9 +114,9 @@ async def create_employee(
     
     try:
         # Validar que la empresa exista
-        company = db.query(text("""
+        company = db.execute(text("""
             SELECT id, owner_user_id FROM companies WHERE id = :id
-        """)).params(id=company_id).mappings().first()
+        """), {"id": company_id}).mappings().first()
         
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
