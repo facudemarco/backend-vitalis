@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, Integer, String, UUID, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from fastapi import Form
@@ -77,6 +77,12 @@ class UserSchema(BaseModel):
     role: str
     is_active: bool
     
+    @field_validator('dni', 'phone', 'date_of_birth', mode='before')
+    def parse_string_fields(cls, v):
+        if v is not None and not isinstance(v, str):
+            return str(v)
+        return v
+
     class Config:
         from_attributes = True
 

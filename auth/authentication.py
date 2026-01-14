@@ -1,6 +1,7 @@
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, status, HTTPException, Request
 from jose import JWTError, jwt, ExpiredSignatureError
+from pydantic import ValidationError
 from datetime import datetime, timedelta
 from typing import Optional, Callable
 from sqlalchemy import text
@@ -79,18 +80,25 @@ def get_current_user(request: Request):
             detail="User not found",
         )
 
-    return UserSchema(
-        id=row["id"],
-        email=row["email"],
-        hashed_password=row["hashed_password"],
-        first_name=row["first_name"],
-        last_name=row["last_name"],
-        dni=row["dni"],
-        date_of_birth=row["date_of_birth"],
-        phone=row["phone"],
-        role=row["role"],
-        is_active=row["is_active"],
-    )
+    try:
+        return UserSchema(
+            id=row["id"],
+            email=row["email"],
+            hashed_password=row["hashed_password"],
+            first_name=row["first_name"],
+            last_name=row["last_name"],
+            dni=row["dni"],
+            date_of_birth=row["date_of_birth"],
+            phone=row["phone"],
+            role=row["role"],
+            is_active=row["is_active"],
+        )
+    except ValidationError as e:
+        print(f"Error validating user data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Error validating user profile data",
+        )
 
 def require_active_user(current_user: UserSchema = Depends(get_current_user)) -> UserSchema:
     """Verifica que el usuario esté activo"""
