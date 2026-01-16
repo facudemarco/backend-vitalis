@@ -17,6 +17,7 @@ origins = [
     "http://localhost:3000",
     "https://saludvitalis.org",
     "https://www.saludvitalis.org",
+    "https://vitalis-website.vercel.app",
     "http://saludvitalis.org",
     "http://www.saludvitalis.org",
     "http://127.0.0.1:8000",
