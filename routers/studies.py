@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from models.user import User
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
@@ -383,6 +384,55 @@ async def upload_study_file(
         except:
             pass
         raise HTTPException(status_code=500, detail="Error uploading file")
+    finally:
+        db.close()
+        
+@router.get("/{study_id}/files")
+async def download_study_file(
+    study_id: str,
+    current_user: User = Depends(require_active_user)
+):
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        # JOIN con la tabla correcta: study_files (sin 's' al final)
+        result = db.execute(
+            text("""
+                SELECT 
+                    s.id,
+                    s.patient_id,
+                    sf.file_path,
+                    sf.original_filename,
+                    sf.mime_type
+                FROM studies s
+                INNER JOIN study_files sf ON s.id = sf.study_id
+                WHERE s.id = :study_id
+            """),
+            {"study_id": study_id}
+        ).mappings().first()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Study not found")
+        
+        # Verificar permisos
+        if current_user.role == "patient":
+            if result["patient_id"] != current_user.patient_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Verificar que el archivo existe
+        file_path = result["file_path"]
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Devolver el archivo
+        return FileResponse(
+            path=file_path,
+            filename=result["original_filename"],
+            media_type=result["mime_type"]
+        )
+        
     finally:
         db.close()
 
