@@ -9,7 +9,6 @@ load_dotenv()
 engine = create_engine(
     f"mysql+pymysql://{os.getenv('USER')}:{os.getenv('PASSWORD')}@{os.getenv('HOST')}:{os.getenv('PORT')}/{os.getenv('DATABASE')}",
     pool_size=5, # Tamaño del pool
-    max_overflow=10, # Máximo de conexiones extra
     pool_timeout=30, # Timeout para obtener conexión
     pool_recycle=1800, # Reciclar conexiones cada 30 min
     pool_pre_ping=True # Verificar conexión antes de usar
