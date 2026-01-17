@@ -20,7 +20,7 @@ if os.name != 'posix' and not os.getenv("STUDIES_DIR"):
      PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
      STUDIES_DIR = os.path.join(PROJECT_ROOT, "studies")
      
-DOMAIN_URL = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies"
+DOMAIN_URL = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies/files/"
 
 def _format_study(row) -> dict:
     return {
