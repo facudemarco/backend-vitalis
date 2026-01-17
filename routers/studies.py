@@ -139,8 +139,8 @@ async def create_study(
     finally:
         db.close()
 
-@router.get("/", tags=["Studies"])
-async def get_studies():
+@router.get("/{patient_id}", tags=["Studies"])
+async def get_studies(patient_id: str):
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
@@ -150,32 +150,47 @@ async def get_studies():
             text("""
                 SELECT id, patient_id, created_by_user_id, study_type, status, created_at
                 FROM studies
+                WHERE patient_id = :patient_id
                 ORDER BY created_at DESC
-            """)
+            """),
+            {"patient_id": patient_id}
         ).mappings().all()
         
+        if not rows:
+            return {"studies": [], "total": 0}
+
         # Studies files
-        study_id = rows[0]["id"]
-        
-        files = db.execute(
+        # Fetch files for all studies matching the patient_id (which is safer and cleaner than passing a list of IDs)
+        files_rows = db.execute(
             text("""
                 SELECT id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at
                 FROM study_files
-                WHERE study_id = :study_id
+                WHERE study_id IN (
+                    SELECT id FROM studies WHERE patient_id = :patient_id
+                )
             """),
-            {"study_id": study_id}
+            {"patient_id": patient_id}
         ).mappings().all() 
+        
+        # Group files by study_id
+        files_by_study = {}
+        for f in files_rows:
+            sid = f["study_id"]
+            if sid not in files_by_study:
+                files_by_study[sid] = []
+            files_by_study[sid].append(f)
         
         studies = []
         for row in rows:
+            sid = row["id"]
             studies.append({
-                "id": row["id"],
+                "id": sid,
                 "patient_id": row["patient_id"],
                 "created_by_user_id": row["created_by_user_id"],
                 "study_type": row["study_type"],
                 "status": row["status"],
                 "created_at": row["created_at"],
-                "files": files
+                "files": files_by_study.get(sid, [])
             })
         
         return {"studies": studies, "total": len(studies)}
@@ -183,7 +198,7 @@ async def get_studies():
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error fetching studies")
+        raise HTTPException(status_code=500, detail="Error fetching studies" + str(e))
     finally:
         db.close()
 
