@@ -33,19 +33,14 @@ async def login(response: Response, email: str = Form(...), password: str = Form
         value=f"Bearer {access_token}",
         httponly=True,
         secure=True,       
-        samesite="lax",    
+        samesite="none",    
         max_age=60 * 60 * 24 * 7,   
         path="/",
     )
-
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "role": user.role,
-        },
+        "user": user,
         "profile": profile,
     }
     
@@ -58,11 +53,7 @@ async def logout(response: Response):
 async def read_current_user(current_user: UserSchema = Depends(require_active_user)):
     profile = resolve_profile_ids(str(current_user.id), str(current_user.role))
     return {
-        "user": {
-            "id": current_user.id,
-            "email": current_user.email,
-            "role": current_user.role,
-        },
+        "user": current_user,
         "profile": profile,
     }
     
