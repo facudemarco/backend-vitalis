@@ -20,7 +20,7 @@ if os.name != 'posix' and not os.getenv("STUDIES_DIR"):
      PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
      STUDIES_DIR = os.path.join(PROJECT_ROOT, "studies")
      
-DOMAIN_URL = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies/files/"
+DOMAIN_URL = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies/files"
 
 def _format_study(row) -> dict:
     return {
@@ -140,33 +140,45 @@ async def create_study(
         db.close()
 
 @router.get("/", tags=["Studies"])
-async def get_studies(
-    patient_id: str = Query(None),
-    current_user: User = Depends(require_active_user)
-):
+async def get_studies():
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        if not patient_id:
-            raise HTTPException(status_code=400, detail="patient_id is required")
-        
-        _check_access_to_patient(current_user, patient_id, db)
-        
         rows = db.execute(
             text("""
-                SELECT id, patient_id, professional_id, created_by_user_id, study_type, 
-                       title, description, created_at
+                SELECT id, patient_id, created_by_user_id, study_type, status, created_at
                 FROM studies
-                WHERE patient_id = :pid
                 ORDER BY created_at DESC
-            """),
-            {"pid": patient_id}
+            """)
         ).mappings().all()
         
-        studies = [_format_study(row) for row in rows]
-        return {"patient_id": patient_id, "studies": studies, "total": len(studies)}
+        # Studies files
+        study_id = rows[0]["id"]
+        
+        files = db.execute(
+            text("""
+                SELECT id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at
+                FROM study_files
+                WHERE study_id = :study_id
+            """),
+            {"study_id": study_id}
+        ).mappings().all() 
+        
+        studies = []
+        for row in rows:
+            studies.append({
+                "id": row["id"],
+                "patient_id": row["patient_id"],
+                "created_by_user_id": row["created_by_user_id"],
+                "study_type": row["study_type"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "files": files
+            })
+        
+        return {"studies": studies, "total": len(studies)}
     
     except HTTPException:
         raise
@@ -184,8 +196,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
     try:
         row = db.execute(
             text("""
-                SELECT id, patient_id, professional_id, created_by_user_id, study_type, 
-                       title, description, created_at
+                SELECT id, patient_id, professional_id, created_by_user_id, study_type, status, created_at
                 FROM studies
                 WHERE id = :sid
             """),
@@ -231,9 +242,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
 async def update_study(
     study_id: str,
     study_type: str = Form(default=None),
-    title: str = Form(default=None),
-    description: str = Form(default=None),
-    # status: str = Form(default=None),
+    status: str = Form(default=None),
     current_user: User = Depends(require_roles("professional", "admin"))
 ):
     db = getConnectionForLogin()
@@ -255,15 +264,9 @@ async def update_study(
         if study_type is not None:
             updates.append("study_type = :study_type")
             params["study_type"] = study_type
-        if title is not None:
-            updates.append("title = :title")
-            params["title"] = title
-        if description is not None:
-            updates.append("description = :description")
-            params["description"] = description
-        # if status is not None:
-        #     updates.append("status = :status")
-        #     params["status"] = status
+        if status is not None:
+            updates.append("status = :status")
+            params["status"] = status
         
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
