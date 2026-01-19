@@ -5,3 +5,6 @@ __pycache__/
 repro_error.py
 test_pydantic.py
 data_images/
+studies/
+signatures/
+test_bool_model.py
