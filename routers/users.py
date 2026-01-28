@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from models.user import User, professionals
 from auth.authentication import require_roles, require_active_user
@@ -188,8 +189,8 @@ async def get_users_by_role(role: str, current_user: User = Depends(require_role
 @router.patch("/{user_id}", tags=["Admin - Users"])
 async def update_user(
     user_id: str,
-    role: str = None,
-    is_active: bool = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
     current_user: User = Depends(require_roles("admin"))
 ):
     """Cambiar role e is_active de un usuario (solo admin)"""

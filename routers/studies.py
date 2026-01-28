@@ -1,3 +1,4 @@
+from os import name
 from Database.getConnection import engine
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File, Query
@@ -21,6 +22,20 @@ if os.name != 'posix' and not os.getenv("STUDIES_DIR"):
      STUDIES_DIR = os.path.join(PROJECT_ROOT, "studies")
      
 DOMAIN_URL = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies/files"
+
+STUDIES_ADMIN_DIR = os.getenv("STUDIES_ADMIN_DIR", "/home/iweb/vitalis/data/studies_admin/")
+if os.name != 'posix' and not os.getenv("STUDIES_ADMIN_DIR"):
+     # Fallback for windows dev
+     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+     STUDIES_ADMIN_DIR = os.path.join(PROJECT_ROOT, "studies_admin")
+     
+# Ensure studies admin directory exists
+try:
+    os.makedirs(STUDIES_ADMIN_DIR, exist_ok=True)
+except Exception as e:
+    print(f"Warning: Could not create studies admin directory: {e}")
+
+DOMAIN_URL_ADMIN = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies_admin/files"
 
 def _format_study(row) -> dict:
     return {
@@ -457,5 +472,178 @@ async def delete_study_file(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error deleting file")
+    finally:
+        db.close()
+
+# Studies admin
+
+@router.post("/admin/create_study_category", tags=["Studies Admin"])
+async def create_study_category(
+    name: str = Form(...),
+    image: UploadFile = File(None),
+):
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        id = str(uuid.uuid4())
+        
+        if image:
+            file_id = str(uuid.uuid4())
+            file_extension = os.path.splitext(image.filename or "")[1]
+            stored_filename = f"{file_id}{file_extension}"
+            file_path = os.path.join(STUDIES_ADMIN_DIR, stored_filename)
+            
+            with open(file_path, "wb") as f:
+                content = await image.read()
+                f.write(content)
+            
+            # Construct URL
+            base_url = DOMAIN_URL_ADMIN.rstrip("/")
+            url_image = f"{base_url}/{stored_filename}"
+            
+            db.execute(
+                text("INSERT INTO studies_admin (id, name, url_image) VALUES (:id, :name, :url_image)"),
+                {"id": id, "name": name, "url_image": url_image}
+            )
+        
+        db.commit()
+        
+        return {"detail": "Study created successfully", "study_id": id}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creating study: {str(e)}")
+    finally:
+        db.close()
+        
+@router.get("/admin/get_study_categories", tags=["Studies Admin"])
+async def get_study_categories():
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        result = db.execute(
+            text("SELECT id, name, url_image FROM studies_admin")
+        ).mappings().all()
+        
+        return {"studies_categories": [dict(row) for row in result]}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting study categories: {str(e)}")
+    finally:
+        db.close()
+
+@router.put("/admin/update_study_category/{study_id}", tags=["Studies Admin"])
+async def update_study_category(
+    study_id: str,
+    name: str = Form(...),
+    image: UploadFile = File(None),
+):
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        if image:
+            # 1. Get current image URL
+            current_study = db.execute(
+                text("SELECT url_image FROM studies_admin WHERE id = :id"),
+                {"id": study_id}
+            ).mappings().first()
+            
+            if current_study and current_study["url_image"]:
+                try:
+                    # Parse filename from URL
+                    old_filename = current_study["url_image"].split("/")[-1]
+                    old_file_path = os.path.join(STUDIES_ADMIN_DIR, old_filename)
+                    if os.path.exists(old_file_path):
+                        os.remove(old_file_path)
+                except Exception as e:
+                    print(f"Error removing old study image: {e}")
+
+            # 2. Save new image
+            file_id = str(uuid.uuid4())
+            file_extension = os.path.splitext(image.filename or "")[1]
+            stored_filename = f"{file_id}{file_extension}"
+            file_path = os.path.join(STUDIES_ADMIN_DIR, stored_filename)
+            
+            with open(file_path, "wb") as f:
+                content = await image.read()
+                f.write(content)
+            
+            # Construct URL
+            base_url = DOMAIN_URL_ADMIN.rstrip("/")
+            url_image = f"{base_url}/{stored_filename}"
+            
+            db.execute(
+                text("UPDATE studies_admin SET name = :name, url_image = :url_image WHERE id = :id"),
+                {"id": study_id, "name": name, "url_image": url_image}
+            )
+        else:
+            # Only update name if no image provided
+            db.execute(
+                text("UPDATE studies_admin SET name = :name WHERE id = :id"),
+                {"id": study_id, "name": name}
+            )
+        
+        db.commit()
+        
+        return {"detail": "Study updated successfully", "study_id": study_id}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating study: {str(e)}")
+    finally:
+        db.close()
+
+@router.delete("/admin/delete_study_category/{study_id}", tags=["Studies Admin"])
+async def delete_study_category(
+    study_id: str,
+    current_user: User = Depends(require_roles("admin"))
+):
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        # 1. Get study info to delete image
+        current_study = db.execute(
+            text("SELECT url_image FROM studies_admin WHERE id = :id"),
+            {"id": study_id}
+        ).mappings().first()
+        
+        if current_study and current_study["url_image"]:
+            try:
+                # Parse filename from URL
+                old_filename = current_study["url_image"].split("/")[-1]
+                old_file_path = os.path.join(STUDIES_ADMIN_DIR, old_filename)
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+            except Exception as e:
+                print(f"Error removing study image: {e}")
+        
+        # 2. Delete study from database
+        db.execute(
+            text("DELETE FROM studies_admin WHERE id = :id"),
+            {"id": study_id}
+        )
+        db.commit()
+        
+        return {"detail": "Study deleted successfully", "study_id": study_id}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting study: {str(e)}")
     finally:
         db.close()

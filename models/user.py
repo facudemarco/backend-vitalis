@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, TYPE_CHECKING
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, Integer, String, UUID, Boolean
 from sqlalchemy.ext.declarative import declarative_base
@@ -52,16 +52,28 @@ class companies(Base):
 class User(Base):
     __tablename__ = "users"
     
-    id = Column(CHAR(36), primary_key=True, index=True)
-    email = Column(String(100), unique=True, index=True)
-    hashed_password = Column(String(100))
-    first_name = Column(String(50))
-    last_name = Column(String(50))
-    dni = Column(String(50))
-    date_of_birth = Column(String(50))
-    phone = Column(String(50))
-    role = Column(String(50))
-    is_active = Column(Boolean, default=True)
+    if TYPE_CHECKING:
+        id: str
+        email: str
+        hashed_password: str
+        first_name: str
+        last_name: str
+        dni: str
+        date_of_birth: str
+        phone: str
+        role: str
+        is_active: bool
+    else:
+        id = Column(CHAR(36), primary_key=True, index=True)
+        email = Column(String(100), unique=True, index=True)
+        hashed_password = Column(String(100))
+        first_name = Column(String(50))
+        last_name = Column(String(50))
+        dni = Column(String(50))
+        date_of_birth = Column(String(50))
+        phone = Column(String(50))
+        role = Column(String(50))
+        is_active = Column(Boolean, default=True)
     
 
 class UserSchema(BaseModel):
