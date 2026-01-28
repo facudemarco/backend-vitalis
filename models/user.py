@@ -28,9 +28,9 @@ class professionals(Base):
     __tablename__ = "professionals"
     id = Column(CHAR(36), primary_key=True, index=True)
     user_id = Column(CHAR(36))
-    license_number = Column(String(50))
-    speciality = Column(String(50))
-    phone = Column(String(50))
+    license_number = Column(String(255))
+    speciality = Column(String(255))
+    phone = Column(Integer)
     
     class Config:
         from_attributes = True

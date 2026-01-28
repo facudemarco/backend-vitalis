@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from models.user import User
+from models.user import User, professionals
 from auth.authentication import require_roles, require_active_user
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
@@ -49,6 +49,41 @@ async def get_users(current_user: User = Depends(require_roles("admin"))):
         return {"users": users, "total": len(users)}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Error fetching users")
+    finally:
+        db.close()
+
+
+@router.get("/getProfessionals", tags=["Admin - Users"])
+async def get_professionals(current_user: User = Depends(require_roles("admin"))):
+    """Obtener profesionales (solo admin)"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        # Join User and professionals tables
+        rows = db.query(User, professionals).join(professionals, User.id == professionals.user_id).all()
+        
+        result_list = []
+        for u, p in rows:
+            result_list.append({
+                "professional_id": p.id,
+                "user_id": u.id,
+                "name": u.first_name,
+                "lastname": u.last_name,
+                "dni": u.dni,
+                "date_of_birth": u.date_of_birth,
+                "license_number": p.license_number,
+                "email": u.email,
+                "speciality": p.speciality,
+                "phone": p.phone,
+                "created_at": getattr(u, 'created_at', None),
+            })
+            
+        return {"users": result_list, "total": len(result_list)}
+    except Exception as e:
+        print(f"Error fetching professionals: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching professionals")
     finally:
         db.close()
 
@@ -146,6 +181,8 @@ async def get_users_by_role(role: str, current_user: User = Depends(require_role
     finally:
         db.close()
 
+
+    
 # ==================== PATCH USER ====================
 
 @router.patch("/{user_id}", tags=["Admin - Users"])

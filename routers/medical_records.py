@@ -491,11 +491,70 @@ async def update_medical_record(
                     query = f"INSERT INTO {table_name} ({', '.join(cols)}) VALUES ({', '.join(vals)})"
                     db.execute(text(query), field_value)
         
-        # Handle Signature Update (New file replaces old?)
+        # Handle Signature Update (New file replaces old)
         if file:
-            # Process new file...
-            # (Similar logic to create)
-            pass
+            try:
+                # 1. Check for existing signature
+                existing_sig = db.execute(
+                    text("SELECT id, url FROM medical_record_signatures WHERE medical_record_id = :rid"),
+                    {"rid": record_id}
+                ).mappings().first()
+
+                if existing_sig:
+                    # Delete file
+                    if existing_sig["url"]:
+                        try:
+                            # Parse filename from URL
+                            # Assuming URL format ends with /filename
+                            old_filename = existing_sig["url"].split("/")[-1]
+                            old_file_path = SIGNATURES_DIR / old_filename
+                            if old_file_path.exists():
+                                os.remove(old_file_path)
+                        except Exception as e:
+                            print(f"Error removing old signature file: {e}")
+
+                    # Delete DB entry
+                    db.execute(
+                        text("DELETE FROM medical_record_signatures WHERE id = :id"),
+                        {"id": existing_sig["id"]}
+                    )
+
+                # 2. Save new file
+                filename_str = file.filename or "signature.png"
+                file_ext = os.path.splitext(filename_str)[1]
+                filename = f"sig_{uuid.uuid4()}{file_ext}"
+                file_path = SIGNATURES_DIR / filename
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                # Construct URL
+                base_url = DOMAIN_URL.rstrip("/")
+                signature_url = f"{base_url}/{filename}"
+
+                # 3. Insert new DB entry
+                new_sig_id = str(uuid.uuid4())
+                
+                # Retrieve professional_id
+                prof_id = None
+                # Check for professional role or admin who might have professional profile
+                prof_id = _get_professional_id(db, current_user.id)
+
+                sig_data = {
+                    "id": new_sig_id,
+                    "medical_record_id": record_id,
+                    "url": signature_url,
+                    "professional_id": prof_id,
+                    "created_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                keys = list(sig_data.keys())
+                vals = [f":{k}" for k in keys]
+                query = f"INSERT INTO medical_record_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"
+                db.execute(text(query), sig_data)
+
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error processing signature update: {str(e)}")
             
         db.commit()
         return {"detail": "Updated successfully"}
