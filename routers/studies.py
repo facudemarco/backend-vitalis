@@ -267,6 +267,54 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
     finally:
         db.close()
 
+@router.get("/files/{study_id}", tags=["Studies"])
+async def download_study_file(
+    study_id: str,
+    current_user: User = Depends(require_active_user),
+):
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    try:
+        row = db.execute(
+            text("""
+                SELECT
+                    s.patient_id,
+                    sf.file_path,
+                    sf.original_filename,
+                    sf.mime_type
+                FROM studies s
+                INNER JOIN study_files sf ON s.id = sf.study_id
+                WHERE s.id = :study_id
+                ORDER BY sf.uploaded_at DESC
+                LIMIT 1
+            """),
+            {"study_id": study_id},
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Study not found")
+
+        # Permisos (si es paciente)
+        if current_user.role == "patient":
+            if row["patient_id"] != current_user.patient_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+        full_path = (STUDIES_DIR / row["file_path"]).resolve()
+
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        return FileResponse(
+            path=str(full_path),
+            filename=row["original_filename"],
+            media_type=row["mime_type"],
+        )
+
+    finally:
+        db.close()
+
 @router.patch("/{study_id}", tags=["Studies"])
 async def update_study(
     study_id: str,
