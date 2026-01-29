@@ -32,7 +32,7 @@ async def get_companies(current_user: User = Depends(require_active_user)):
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        if current_user.role == "admin" or current_user.role == "professional:
+        if current_user.role == "admin" or current_user.role == "professional":
             # Admin ve todas
             rows = db.execute(text("""
                 SELECT id, name, responsable_name, cuit, email, phone, address, owner_user_id
