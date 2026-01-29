@@ -13,7 +13,7 @@ from typing import Optional
 import shutil
 from typing import List
 
-router = APIRouter(prefix="/studies", tags=["Studies"])
+router = APIRouter(prefix="/studies")
 
 STUDIES_DIR = os.getenv("STUDIES_DIR", "/home/iweb/vitalis/data/studies/")
 if os.name != 'posix' and not os.getenv("STUDIES_DIR"):
@@ -68,7 +68,7 @@ async def create_study(
     study_type: str = Form(...),
     status: str = Form(...),
     study_files: List[UploadFile] = File(...),
-    current_user: User = Depends(require_active_user)
+    current_user: User = Depends(require_roles("admin", "professional"))
 ):
     db = getConnectionForLogin()
     if db is None:
