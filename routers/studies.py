@@ -41,12 +41,11 @@ def _format_study(row) -> dict:
     return {
         "id": row["id"],
         "patient_id": row["patient_id"],
-        "professional_id": row["professional_id"],
+        # "professional_id": row["professional_id"], # Removed as column doesn't exist
         "created_by_user_id": row["created_by_user_id"],
         "study_type": row["study_type"],
-        "title": row["title"],
-        "description": row["description"],
-        "description": row["description"],
+        # "title": row["title"],
+        # "description": row["description"],
         # "status": row["status"], # Removed as column doesn't exist
         "created_at": row.get("created_at"),
     }
@@ -154,7 +153,7 @@ async def create_study(
     finally:
         db.close()
 
-@router.get("/{patient_id}", tags=["Studies"])
+@router.get("/patient/{patient_id}", tags=["Studies"])
 async def get_studies(patient_id: str):
     db = getConnectionForLogin()
     if db is None:
@@ -226,7 +225,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
     try:
         row = db.execute(
             text("""
-                SELECT id, patient_id, professional_id, created_by_user_id, study_type, status, created_at
+                SELECT id, patient_id, created_by_user_id, study_type, status, created_at
                 FROM studies
                 WHERE id = :sid
             """),
@@ -264,7 +263,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error fetching study")
+        raise HTTPException(status_code=500, detail="Error fetching study" + str(e))
     finally:
         db.close()
 
