@@ -124,7 +124,7 @@ async def create_study(
                 {
                     "id": file_id,
                     "study_id": study_id,
-                    "file_path": path,
+                    "file_path": url_main,
                     "original_filename": file.filename,
                     "mime_type": file.content_type,
                     "size_bytes": size_bytes,
@@ -277,24 +277,47 @@ async def download_study_file(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
-        row = db.execute(
-            text("""
-                SELECT
-                    s.patient_id,
-                    sf.file_path,
-                    sf.original_filename,
-                    sf.mime_type
-                FROM studies s
-                INNER JOIN study_files sf ON s.id = sf.study_id
-                WHERE s.id = :study_id
-                ORDER BY sf.uploaded_at DESC
-                LIMIT 1
-            """),
-            {"study_id": study_id},
-        ).mappings().first()
+        # Determine if we are looking up by specific filename (via URL) or getting latest for study
+        # If study_id looks like a filename (has dot), we search by file_path pattern
+        is_filename_lookup = "." in study_id
+
+        if is_filename_lookup:
+            # Search by filename match in file_path (url)
+            # We join with studies to get patient_id for permission check
+            row = db.execute(
+                text("""
+                    SELECT
+                        s.patient_id,
+                        sf.file_path,
+                        sf.original_filename,
+                        sf.mime_type
+                    FROM study_files sf
+                    INNER JOIN studies s ON s.id = sf.study_id
+                    WHERE sf.file_path LIKE :pattern
+                    LIMIT 1
+                """),
+                {"pattern": f"%/{study_id}"},
+            ).mappings().first()
+        else:
+            # Original behavior: get latest file for study_id
+            row = db.execute(
+                text("""
+                    SELECT
+                        s.patient_id,
+                        sf.file_path,
+                        sf.original_filename,
+                        sf.mime_type
+                    FROM studies s
+                    INNER JOIN study_files sf ON s.id = sf.study_id
+                    WHERE s.id = :study_id
+                    ORDER BY sf.uploaded_at DESC
+                    LIMIT 1
+                """),
+                {"study_id": study_id},
+            ).mappings().first()
 
         if not row:
-            raise HTTPException(status_code=404, detail="Study not found")
+            raise HTTPException(status_code=404, detail="File not found")
 
         # ✅ Permisos (si es paciente): traigo patient_id real desde DB
         if current_user.role == "patient":
@@ -316,18 +339,24 @@ async def download_study_file(
             if str(row["patient_id"]) != str(user_patient_id):
                 raise HTTPException(status_code=403, detail="Access denied")
 
-        # ✅ Resolver archivo
+        # ✅ Resolver archivo local desde URL o Path
         studies_dir = Path(os.getenv("STUDIES_DIR", "/home/iweb/vitalis/data/studies/")).resolve()
-
-        # Si en DB guardás /app/studies/xxx.pdf, esto funciona.
-        # Si en DB guardás solo xxx.pdf, también funciona con el if de abajo.
-        file_path = Path(row["file_path"])
-
-        if not file_path.is_absolute():
-            file_path = (studies_dir / file_path).resolve()
+        
+        # Extract filename from stored path (whether it's URL or local path)
+        stored_path = row["file_path"]
+        filename = os.path.basename(stored_path)
+        file_path = (studies_dir / filename).resolve()
+        
+        # Fallback for legacy absolute paths if they exist and don't match simple join
+        # (Though basename join should cover absolute paths too if they are flat in STUDIES_DIR)
 
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail="File not found")
+            # Try treating stored path as absolute if it looks like one and not a URL
+            if not stored_path.startswith("http") and os.path.exists(stored_path):
+                 file_path = Path(stored_path)
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found on server")
 
         return FileResponse(
             path=str(file_path),
@@ -413,8 +442,11 @@ async def delete_study(
         
         for f in files:
             try:
-                if os.path.exists(f["file_path"]):
-                    os.remove(f["file_path"])
+                # Resolve local path from potential URL
+                fname = os.path.basename(f["file_path"])
+                local_path = os.path.join(STUDIES_DIR, fname)
+                if os.path.exists(local_path):
+                    os.remove(local_path)
             except Exception:
                 pass
         
@@ -470,6 +502,8 @@ async def upload_study_file(
         size_bytes = len(content)
         now = datetime.utcnow().isoformat()
         
+        file_url = f"{DOMAIN_URL}/{stored_filename}"
+
         db.execute(text("""
             INSERT INTO study_files
             (id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at)
@@ -477,7 +511,7 @@ async def upload_study_file(
         """), {
             "id": file_id,
             "study_id": study_id,
-            "file_path": file_path,
+            "file_path": file_url,
             "original_filename": file.filename,
             "mime_type": file.content_type,
             "size_bytes": size_bytes,
@@ -525,8 +559,11 @@ async def delete_study_file(
             raise HTTPException(status_code=404, detail="File not found")
         
         try:
-            if os.path.exists(file_row["file_path"]):
-                os.remove(file_row["file_path"])
+            # Resolve local path from potential URL
+            fname = os.path.basename(file_row["file_path"])
+            local_path = os.path.join(STUDIES_DIR, fname)
+            if os.path.exists(local_path):
+                os.remove(local_path)
         except Exception:
             pass
         
