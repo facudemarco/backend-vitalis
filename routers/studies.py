@@ -268,7 +268,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
         db.close()
 
 @router.get("/files/{study_id}", tags=["Studies"])
-async def download_study_file(
+async def get_study_file_link(
     study_id: str,
     current_user: User = Depends(require_active_user),
 ):
@@ -277,92 +277,43 @@ async def download_study_file(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
-        # Determine if we are looking up by specific filename (via URL) or getting latest for study
-        # If study_id looks like a filename (has dot), we search by file_path pattern
-        is_filename_lookup = "." in study_id
-
-        if is_filename_lookup:
-            # Search by filename match in file_path (url)
-            # We join with studies to get patient_id for permission check
-            row = db.execute(
-                text("""
-                    SELECT
-                        s.patient_id,
-                        sf.file_path,
-                        sf.original_filename,
-                        sf.mime_type
-                    FROM study_files sf
-                    INNER JOIN studies s ON s.id = sf.study_id
-                    WHERE sf.file_path LIKE :pattern
-                    LIMIT 1
-                """),
-                {"pattern": f"%/{study_id}"},
-            ).mappings().first()
-        else:
-            # Original behavior: get latest file for study_id
-            row = db.execute(
-                text("""
-                    SELECT
-                        s.patient_id,
-                        sf.file_path,
-                        sf.original_filename,
-                        sf.mime_type
-                    FROM studies s
-                    INNER JOIN study_files sf ON s.id = sf.study_id
-                    WHERE s.id = :study_id
-                    ORDER BY sf.uploaded_at DESC
-                    LIMIT 1
-                """),
-                {"study_id": study_id},
-            ).mappings().first()
+        row = db.execute(
+            text("""
+                SELECT
+                    s.patient_id,
+                    sf.file_path,
+                    sf.original_filename,
+                    sf.mime_type
+                FROM studies s
+                INNER JOIN study_files sf ON s.id = sf.study_id
+                WHERE s.id = :study_id
+                ORDER BY sf.uploaded_at DESC
+                LIMIT 1
+            """),
+            {"study_id": study_id},
+        ).mappings().first()
 
         if not row:
-            raise HTTPException(status_code=404, detail="File not found")
+            raise HTTPException(status_code=404, detail="Study not found")
 
-        # ✅ Permisos (si es paciente): traigo patient_id real desde DB
+        # ✅ permisos (si es paciente)
         if current_user.role == "patient":
-            user_id = current_user.id
-
             user_patient_id = db.execute(
-                text("""
-                    SELECT p.id
-                    FROM patients p
-                    WHERE p.user_id = :uid
-                    LIMIT 1
-                """),
-                {"uid": user_id},
+                text("SELECT id FROM patients WHERE user_id = :uid LIMIT 1"),
+                {"uid": current_user.id},
             ).scalar()
 
-            if not user_patient_id:
+            if not user_patient_id or str(user_patient_id) != str(row["patient_id"]):
                 raise HTTPException(status_code=403, detail="Access denied")
 
-            if str(row["patient_id"]) != str(user_patient_id):
-                raise HTTPException(status_code=403, detail="Access denied")
+        if not row["file_path"]:
+            raise HTTPException(status_code=404, detail="File link not found")
 
-        # ✅ Resolver archivo local desde URL o Path
-        studies_dir = Path(os.getenv("STUDIES_DIR", "/home/iweb/vitalis/data/studies/")).resolve()
-        
-        # Extract filename from stored path (whether it's URL or local path)
-        stored_path = row["file_path"]
-        filename = os.path.basename(stored_path)
-        file_path = (studies_dir / filename).resolve()
-        
-        # Fallback for legacy absolute paths if they exist and don't match simple join
-        # (Though basename join should cover absolute paths too if they are flat in STUDIES_DIR)
-
-        if not file_path.exists():
-            # Try treating stored path as absolute if it looks like one and not a URL
-            if not stored_path.startswith("http") and os.path.exists(stored_path):
-                 file_path = Path(stored_path)
-
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="File not found on server")
-
-        return FileResponse(
-            path=str(file_path),
-            filename=row["original_filename"],
-            media_type=row["mime_type"],
-        )
+        return {
+            "url": row["file_path"], 
+            "original_filename": row["original_filename"],
+            "mime_type": row["mime_type"],
+        }
 
     finally:
         db.close()
