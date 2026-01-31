@@ -296,24 +296,48 @@ async def download_study_file(
         if not row:
             raise HTTPException(status_code=404, detail="Study not found")
 
-        # Permisos (si es paciente)
+        # ✅ Permisos (si es paciente): traigo patient_id real desde DB
         if current_user.role == "patient":
-            if row["patient_id"] != current_user.patient_id:
+            user_id = current_user.id
+
+            user_patient_id = db.execute(
+                text("""
+                    SELECT p.id
+                    FROM patients p
+                    WHERE p.user_id = :uid
+                    LIMIT 1
+                """),
+                {"uid": user_id},
+            ).scalar()
+
+            if not user_patient_id:
                 raise HTTPException(status_code=403, detail="Access denied")
 
-        full_path = (STUDIES_DIR / row["file_path"]).resolve()
+            if str(row["patient_id"]) != str(user_patient_id):
+                raise HTTPException(status_code=403, detail="Access denied")
 
-        if not full_path.exists():
+        # ✅ Resolver archivo
+        studies_dir = Path(os.getenv("STUDIES_DIR", "/home/iweb/vitalis/data/studies/")).resolve()
+
+        # Si en DB guardás /app/studies/xxx.pdf, esto funciona.
+        # Si en DB guardás solo xxx.pdf, también funciona con el if de abajo.
+        file_path = Path(row["file_path"])
+
+        if not file_path.is_absolute():
+            file_path = (studies_dir / file_path).resolve()
+
+        if not file_path.exists():
             raise HTTPException(status_code=404, detail="File not found")
 
         return FileResponse(
-            path=str(full_path),
+            path=str(file_path),
             filename=row["original_filename"],
             media_type=row["mime_type"],
         )
 
     finally:
         db.close()
+
 
 @router.patch("/{study_id}", tags=["Studies"])
 async def update_study(
