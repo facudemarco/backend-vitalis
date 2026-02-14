@@ -446,7 +446,9 @@ async def delete_medical_record(
         raise HTTPException(status_code=500, detail="Database connection error")
         
     try:
-        # 1. Recuperar info de archivos ANTES de borrar nada
+        # ---------------------------------------------------------
+        # 1. Recuperar info de archivos ANTES de borrar la DB
+        # ---------------------------------------------------------
         
         # A. Buscar firmas (Evaluador y Laboral)
         signatures = db.execute(
@@ -488,25 +490,34 @@ async def delete_medical_record(
             delete_physical_file(img_url, DATA_IMAGES_DIR)
 
         # ---------------------------------------------------------
-        # 3. Proceder con el borrado en DB (Tu código original)
+        # 3. Borrado en Base de Datos (Cascada Manual)
         # ---------------------------------------------------------
-        
-        # ... (Tu código de borrado en cascada manual aquí sigue igual) ...
-        # Copia y pega tu bloque "Manual Cascade Delete" original aquí abajo
-        
-        # 1. Handle deep nested first: medical_record_data_img
-        for dr in data_rows: # Ya teniamos data_rows de arriba
+
+        # A. Primero borrar medical_record_data_img (Nivel más profundo)
+        # Usamos los data_rows que recuperamos arriba para ser eficientes
+        for dr in data_rows: 
             db.execute(text("DELETE FROM medical_record_data_img WHERE medical_record_data_id = :did"), {"did": dr["id"]})
             
-        # 2. Delete medical_record_data
+        # B. Borrar medical_record_data
         db.execute(text("DELETE FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id})
         
-        # 3. Delete others (usando tu lista table_names original)
-        table_names = [ ... ] # Tu lista original
+        # C. Borrar el resto de tablas hijas
+        table_names = [
+            "medical_record_bucodental_exam", "medical_record_cardiovascular_exam", "medical_record_clinical_exam",
+            "medical_record_derivations", "medical_record_digestive_exam",
+            "medical_record_evaluation_type", "medical_record_family_history", "medical_record_genitourinario_exam",
+            "medical_record_habits", "medical_record_head_exam", "medical_record_immunizations", "medical_record_laboral_contacts",
+            "medical_record_laboral_exam", "medical_record_laboral_history", "medical_record_neuro_clinical_exam",
+            "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
+            "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
+            "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
+            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures"
+        ]
+        
         for table in table_names:
             db.execute(text(f"DELETE FROM {table} WHERE medical_record_id = :rid"), {"rid": record_id})
             
-        # 4. Delete parent
+        # D. Finalmente, borrar el registro padre
         db.execute(text("DELETE FROM medical_record WHERE id = :rid"), {"rid": record_id})
         
         db.commit()
