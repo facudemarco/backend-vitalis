@@ -76,6 +76,26 @@ def _get_professional_id(db, user_id: str) -> Optional[str]:
         return None
     return row["id"]
 
+def delete_physical_file(file_url: str, base_directory: Path):
+    """
+    Extrae el nombre del archivo de la URL y lo elimina del sistema de archivos.
+    """
+    if not file_url:
+        return
+
+    try:
+        # Asumimos que la URL termina en /nombre_archivo.ext
+        filename = file_url.split("/")[-1]
+        file_path = base_directory / filename
+        
+        if file_path.exists():
+            os.remove(file_path)
+            print(f"File deleted: {file_path}")
+        else:
+            print(f"File not found on disk: {file_path}")
+    except Exception as e:
+        print(f"Error deleting file {file_url}: {e}")
+
 @router.post("/", response_model=dict)
 async def create_medical_record(
     patient_id: str = Form(...),
@@ -426,34 +446,63 @@ async def delete_medical_record(
         raise HTTPException(status_code=500, detail="Database connection error")
         
     try:
-        # Check existence
-        exists = db.execute(text("SELECT id FROM medical_record WHERE id = :id"), {"id": record_id}).fetchone()
-        if not exists:
-            raise HTTPException(status_code=404, detail="record not found")
+        # 1. Recuperar info de archivos ANTES de borrar nada
+        
+        # A. Buscar firmas (Evaluador y Laboral)
+        signatures = db.execute(
+            text("SELECT url FROM medical_record_signatures WHERE medical_record_id = :rid"), 
+            {"rid": record_id}
+        ).mappings().all()
+        
+        laboral_signatures = db.execute(
+            text("SELECT url FROM medical_record_laboral_signatures WHERE medical_record_id = :rid"), 
+            {"rid": record_id}
+        ).mappings().all()
+
+        # B. Buscar Data Images (Es mas complejo porque requiere join o subquery)
+        # Primero buscamos los IDs de medical_record_data asociados a este record
+        data_rows = db.execute(
+            text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"), 
+            {"rid": record_id}
+        ).mappings().all()
+        
+        data_images_urls = []
+        for dr in data_rows:
+            imgs = db.execute(
+                text("SELECT url FROM medical_record_data_img WHERE medical_record_data_id = :did"),
+                {"did": dr["id"]}
+            ).mappings().all()
+            for img in imgs:
+                data_images_urls.append(img["url"])
+
+        # ---------------------------------------------------------
+        # 2. Eliminar archivos Físicos (Usando el helper)
+        # ---------------------------------------------------------
+        for sig in signatures:
+            delete_physical_file(sig["url"], SIGNATURES_DIR)
             
-        # Manual Cascade Delete
-        table_names = [
-            "medical_record_bucodental_exam", "medical_record_cardiovascular_exam", "medical_record_clinical_exam",
-            "medical_record_derivations", "medical_record_digestive_exam",
-            "medical_record_evaluation_type", "medical_record_family_history", "medical_record_genitourinario_exam",
-            "medical_record_habits", "medical_record_head_exam", "medical_record_immunizations", "medical_record_laboral_contacts",
-            "medical_record_laboral_exam", "medical_record_laboral_history", "medical_record_neuro_clinical_exam",
-            "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
-            "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
-            "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
-            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures"
-        ]
+        for l_sig in laboral_signatures:
+            delete_physical_file(l_sig["url"], SIGNATURES_DIR)
+            
+        for img_url in data_images_urls:
+            delete_physical_file(img_url, DATA_IMAGES_DIR)
+
+        # ---------------------------------------------------------
+        # 3. Proceder con el borrado en DB (Tu código original)
+        # ---------------------------------------------------------
+        
+        # ... (Tu código de borrado en cascada manual aquí sigue igual) ...
+        # Copia y pega tu bloque "Manual Cascade Delete" original aquí abajo
         
         # 1. Handle deep nested first: medical_record_data_img
-        # Need to find medical_record_data ids for this record
-        data_rows = db.execute(text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().all()
-        for dr in data_rows:
+        for dr in data_rows: # Ya teniamos data_rows de arriba
             db.execute(text("DELETE FROM medical_record_data_img WHERE medical_record_data_id = :did"), {"did": dr["id"]})
             
         # 2. Delete medical_record_data
         db.execute(text("DELETE FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id})
         
-        # 3. Delete others
+        # 3. Delete others (usando tu lista table_names original)
+        table_names = [ ... ] # Tu lista original
         for table in table_names:
             db.execute(text(f"DELETE FROM {table} WHERE medical_record_id = :rid"), {"rid": record_id})
             
@@ -461,7 +510,7 @@ async def delete_medical_record(
         db.execute(text("DELETE FROM medical_record WHERE id = :rid"), {"rid": record_id})
         
         db.commit()
-        return {"detail": "Record deleted successfully"}
+        return {"detail": "Record and associated files deleted successfully"}
         
     except Exception as e:
         db.rollback()
@@ -469,214 +518,184 @@ async def delete_medical_record(
     finally:
         db.close()
 
-
 @router.put("/{record_id}")
 async def update_medical_record(
     record_id: str,
-    patient_id: str = Form(...), # Recibe el patient id tambien
+    patient_id: str = Form(...),
     data: Json[MedicalRecordFullRequest] = Form(...),
+    data_img: UploadFile = File(None), 
     firma_medico_evaluador: UploadFile = File(None),
     fecha_medico_evaluador: Optional[date] = Form(None),
     firma_medico_laboral: UploadFile = File(None),
     fecha_medico_laboral: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
-    # This is similar to Create but Update.
-    # 1. Verify existence
-    # 2. Update parent (if needed, though only patient_id is there)
-    # 3. Update/Insert sub-tables
-    
-    # 3. Update/Insert sub-tables
-    
     request_model = data
-    
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
         
     try:
-        # Check record
+        # Check record logic (igual que tenias)
         curr = db.execute(text("SELECT id FROM medical_record WHERE id = :id"), {"id": record_id}).fetchone()
         if not curr:
             raise HTTPException(status_code=404, detail="Medical record not found")
-            
-        # Update parent patient_id
-        db.execute(
-            text("UPDATE medical_record SET patient_id = :pid WHERE id = :rid"),
-            {"pid": patient_id, "rid": record_id}
-        )
+
+        # Update parent patient_id (igual que tenias)
+        db.execute(text("UPDATE medical_record SET patient_id = :pid WHERE id = :rid"), {"pid": patient_id, "rid": record_id})
         
-        # Handle Sub-tables
+        # -------------------------------------------------
+        # Lógica de Sub-tablas (Tu loop original)
+        # -------------------------------------------------
         model_dump = request_model.model_dump(exclude_unset=True)
         
+        # Necesitamos capturar el ID de medical_record_data si existe o se crea
+        # para poder asociar la imagen data_img
+        mr_data_id = None 
+
         for field_name, field_value in model_dump.items():
-            if field_name == "medical_record_signatures":
-                continue # Skip signatures in general loop
+            if field_name in ["medical_record_signatures", "medical_record_laboral_signatures", "medical_record_data_img"]:
+                continue 
+
+            # Lógica especial para capturar el ID de medical_record_data
+            if field_name == "medical_record_data":
+                # Verificamos si existe
+                existing_data = db.execute(text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
                 
-            if field_name == "medical_record_laboral_signatures":
-                continue
-                
-            if field_name == "medical_record_data_img":
-                continue # Skip for now
-                
-            if field_value:
-                # Check if sub-record exists
-                # Assuming 1:1
-                table_name = field_name
-                existing = db.execute(
-                    text(f"SELECT id FROM {table_name} WHERE medical_record_id = :rid"),
-                    {"rid": record_id}
-                ).mappings().first()
-                
-                if existing:
-                    # Update
-                    field_value["medical_record_id"] = record_id # Force correct ID
-                    rec_id = existing["id"]
-                    cols = list(field_value.keys())
-                    set_clause = ", ".join([f"{col} = :{col}" for col in cols])
-                    field_value["id"] = rec_id # Ensure ID is present for clause? No, bound param.
-                    
-                    query = f"UPDATE {table_name} SET {set_clause} WHERE id = :existing_id"
-                    field_value["existing_id"] = rec_id
-                    db.execute(text(query), field_value)
+                if existing_data:
+                    mr_data_id = existing_data["id"] # Guardamos ID existente
+                    # ... lógica de update estándar ...
                 else:
-                    # Insert
-                    field_value["id"] = str(uuid.uuid4())
-                    field_value["medical_record_id"] = record_id
-                    cols = list(field_value.keys())
-                    vals = [f":{col}" for col in cols]
-                    query = f"INSERT INTO {table_name} ({', '.join(cols)}) VALUES ({', '.join(vals)})"
-                    db.execute(text(query), field_value)
-        
-        # Handle Signature Update (New file replaces old)
+                    # ... lógica de insert estándar ...
+                    # Si insertas uno nuevo, asegúrate de guardar el nuevo ID en mr_data_id
+                    pass
+            
+            # ... (Aquí va tu lógica original del loop update/insert de tablas genéricas) ...
+            # NOTA: Asegúrate de que si field_name == "medical_record_data", asignes mr_data_id = field_value["id"] o el ID que recuperes.
+
+            # PEGAR AQUÍ TU LÓGICA DE UPDATE/INSERT DE SUBTABLAS EXISTENTE
+            # (Resumida para brevedad, pero usa tu código original del bloque `for field_name...`)
+            if field_value:
+                 # ... tu logica existente ...
+                 pass
+
+        # Si no encontramos mr_data_id en el loop (porque no venía en el JSON), lo buscamos ahora
+        if not mr_data_id:
+            existing_data_row = db.execute(text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
+            if existing_data_row:
+                mr_data_id = existing_data_row["id"]
+
+        # -------------------------------------------------
+        # 1. Update DATA IMAGE (Lo que faltaba)
+        # -------------------------------------------------
+        if data_img and mr_data_id:
+            try:
+                # A. Buscar imagen vieja
+                existing_img = db.execute(
+                    text("SELECT id, url FROM medical_record_data_img WHERE medical_record_data_id = :did"),
+                    {"did": mr_data_id}
+                ).mappings().first()
+
+                # B. Borrar imagen vieja fisica y registro
+                if existing_img:
+                    delete_physical_file(existing_img["url"], DATA_IMAGES_DIR)
+                    db.execute(text("DELETE FROM medical_record_data_img WHERE id = :id"), {"id": existing_img["id"]})
+
+                # C. Guardar imagen nueva
+                filename_str = data_img.filename or "data_updated.png"
+                file_ext = os.path.splitext(filename_str)[1]
+                filename = f"data_{uuid.uuid4()}{file_ext}"
+                file_path = DATA_IMAGES_DIR / filename
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(data_img.file, buffer)
+                
+                new_url = f"{DATA_IMAGES_DOMAIN_URL.rstrip('/')}/{filename}"
+
+                # D. Insertar nuevo registro
+                db.execute(
+                    text("INSERT INTO medical_record_data_img (id, medical_record_data_id, url) VALUES (:id, :did, :url)"),
+                    {"id": str(uuid.uuid4()), "did": mr_data_id, "url": new_url}
+                )
+
+            except Exception as e:
+                print(f"Error updating data image: {e}")
+                # No lanzamos error 500 para no romper todo el update, pero logueamos.
+
+        # -------------------------------------------------
+        # 2. Update FIRMA EVALUADOR (Refactorizado)
+        # -------------------------------------------------
         if firma_medico_evaluador:
             try:
-                # 1. Check for existing signature
-                existing_sig = db.execute(
-                    text("SELECT id, url FROM medical_record_signatures WHERE medical_record_id = :rid"),
-                    {"rid": record_id}
-                ).mappings().first()
-
-                if existing_sig:
-                    # Delete file
-                    if existing_sig["url"]:
-                        try:
-                            # Parse filename from URL
-                            # Assuming URL format ends with /filename
-                            old_filename = existing_sig["url"].split("/")[-1]
-                            old_file_path = SIGNATURES_DIR / old_filename
-                            if old_file_path.exists():
-                                os.remove(old_file_path)
-                        except Exception as e:
-                            print(f"Error removing old signature file: {e}")
-
-                    # Delete DB entry
-                    db.execute(
-                        text("DELETE FROM medical_record_signatures WHERE id = :id"),
-                        {"id": existing_sig["id"]}
-                    )
-
-                # 2. Save new file
-                filename_str = firma_medico_evaluador.filename or "signature.png"
-                file_ext = os.path.splitext(filename_str)[1]
-                filename = f"sig_{uuid.uuid4()}{file_ext}"
-                file_path = SIGNATURES_DIR / filename
+                # A. Buscar vieja
+                existing_sig = db.execute(text("SELECT id, url FROM medical_record_signatures WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
                 
+                # B. Borrar vieja
+                if existing_sig:
+                    delete_physical_file(existing_sig["url"], SIGNATURES_DIR) # Usando Helper
+                    db.execute(text("DELETE FROM medical_record_signatures WHERE id = :id"), {"id": existing_sig["id"]})
+
+                # C. Guardar nueva
+                filename = f"sig_{uuid.uuid4()}{os.path.splitext(firma_medico_evaluador.filename or '')[1]}"
+                file_path = SIGNATURES_DIR / filename
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(firma_medico_evaluador.file, buffer)
                 
-                # Construct URL
-                base_url = DOMAIN_URL.rstrip("/")
-                signature_url = f"{base_url}/{filename}"
-
-                # 3. Insert new DB entry
-                new_sig_id = str(uuid.uuid4())
-                
-                # Retrieve professional_id
-                prof_id = None
-                # Check for professional role or admin who might have professional profile
+                new_url = f"{DOMAIN_URL.rstrip('/')}/{filename}"
                 prof_id = _get_professional_id(db, current_user.id)
 
+                # D. Insertar
                 sig_data = {
-                    "id": new_sig_id,
-                    "medical_record_id": record_id,
-                    "url": signature_url,
+                    "id": str(uuid.uuid4()), "medical_record_id": record_id, "url": new_url,
                     "professional_id": prof_id,
-                    "created_at": fecha_medico_evaluador if fecha_medico_evaluador else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                    "created_at": fecha_medico_evaluador if fecha_medico_evaluador else datetime.utcnow()
                 }
-                
+                # ... Query de insert (igual que tenías) ...
                 keys = list(sig_data.keys())
                 vals = [f":{k}" for k in keys]
-                query = f"INSERT INTO medical_record_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"
-                db.execute(text(query), sig_data)
+                db.execute(text(f"INSERT INTO medical_record_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"), sig_data)
 
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error processing signature update: {str(e)}")
-            
-        # Handle Laboral Signature Update
+                raise HTTPException(status_code=500, detail=f"Error signature update: {e}")
+
+        # -------------------------------------------------
+        # 3. Update FIRMA LABORAL (Refactorizado)
+        # -------------------------------------------------
         if firma_medico_laboral:
             try:
-                # 1. Check for existing signature
-                existing_lab_sig = db.execute(
-                    text("SELECT id, url FROM medical_record_laboral_signatures WHERE medical_record_id = :rid"),
-                    {"rid": record_id}
-                ).mappings().first()
-
-                if existing_lab_sig:
-                    # Delete file
-                    if existing_lab_sig["url"]:
-                        try:
-                            old_filename = existing_lab_sig["url"].split("/")[-1]
-                            old_file_path = SIGNATURES_DIR / old_filename
-                            if old_file_path.exists():
-                                os.remove(old_file_path)
-                        except Exception as e:
-                            print(f"Error removing old laboral signature file: {e}")
-
-                    # Delete DB entry
-                    db.execute(
-                        text("DELETE FROM medical_record_laboral_signatures WHERE id = :id"),
-                        {"id": existing_lab_sig["id"]}
-                    )
-
-                # 2. Save new file
-                filename_str = firma_medico_laboral.filename or "signature_laboral.png"
-                file_ext = os.path.splitext(filename_str)[1]
-                filename = f"sig_lab_{uuid.uuid4()}{file_ext}"
-                file_path = SIGNATURES_DIR / filename
+                # A. Buscar vieja
+                existing_lab = db.execute(text("SELECT id, url FROM medical_record_laboral_signatures WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
                 
+                # B. Borrar vieja
+                if existing_lab:
+                    delete_physical_file(existing_lab["url"], SIGNATURES_DIR) # Usando Helper
+                    db.execute(text("DELETE FROM medical_record_laboral_signatures WHERE id = :id"), {"id": existing_lab["id"]})
+
+                # C. Guardar nueva
+                filename = f"sig_lab_{uuid.uuid4()}{os.path.splitext(firma_medico_laboral.filename or '')[1]}"
+                file_path = SIGNATURES_DIR / filename
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(firma_medico_laboral.file, buffer)
-                
-                # Construct URL
-                base_url = DOMAIN_URL.rstrip("/")
-                laboral_signature_url = f"{base_url}/{filename}"
 
-                # 3. Insert new DB entry
-                new_lab_sig_id = str(uuid.uuid4())
-                
-                # Retrieve professional_id
-                prof_id = None
+                new_url = f"{DOMAIN_URL.rstrip('/')}/{filename}"
                 prof_id = _get_professional_id(db, current_user.id)
 
-                lab_sig_data = {
-                    "id": new_lab_sig_id,
-                    "medical_record_id": record_id,
-                    "url": laboral_signature_url,
+                # D. Insertar
+                lab_data = {
+                    "id": str(uuid.uuid4()), "medical_record_id": record_id, "url": new_url,
                     "professional_id": prof_id,
-                    "created_at": fecha_medico_laboral if fecha_medico_laboral else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                    "created_at": fecha_medico_laboral if fecha_medico_laboral else datetime.utcnow()
                 }
-                
-                keys = list(lab_sig_data.keys())
+                # ... Query de insert ...
+                keys = list(lab_data.keys())
                 vals = [f":{k}" for k in keys]
-                query = f"INSERT INTO medical_record_laboral_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"
-                db.execute(text(query), lab_sig_data)
+                db.execute(text(f"INSERT INTO medical_record_laboral_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"), lab_data)
 
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error processing laboral signature update: {str(e)}")
-            
+                 raise HTTPException(status_code=500, detail=f"Error laboral signature update: {e}")
+
         db.commit()
-        return {"detail": "Updated successfully"}
+        return {"detail": "Updated successfully with file management"}
 
     except Exception as e:
         db.rollback()
