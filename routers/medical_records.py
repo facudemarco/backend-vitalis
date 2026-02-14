@@ -10,7 +10,7 @@ from models.medical_record import (
     MedicalRecordOftalmologicoExam, MedicalRecordOrlExam, MedicalRecordOsteoarticularExam,
     MedicalRecordPersonalHistory, MedicalRecordPreviousProblems, MedicalRecordPsychiatricClinicalExam,
     MedicalRecordRecomendations, MedicalRecordRespiratorioExam, MedicalRecordSignatures,
-    MedicalRecordSkinExam, MedicalRecordStudies, MedicalRecordSurgerys
+    MedicalRecordSkinExam, MedicalRecordStudies, MedicalRecordSurgerys, MedicalRecordLaboralSignatures
 )
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
@@ -24,6 +24,7 @@ import os
 import shutil
 from pathlib import Path
 import json
+from datetime import date
 
 router = APIRouter(prefix="/medical-records", tags=["Medical Records"])
 
@@ -80,7 +81,10 @@ async def create_medical_record(
     patient_id: str = Form(...),
     data: Json[MedicalRecordFullRequest] = Form(...),
     data_img: UploadFile = File(None),
-    file: UploadFile = File(None),
+    firma_medico_evaluador: UploadFile = File(None),
+    fecha_medico_evaluador: date = Form(...),
+    firma_medico_laboral: UploadFile = File(None),
+    fecha_medico_laboral: date = Form(...),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     """
@@ -108,16 +112,16 @@ async def create_medical_record(
 
         # 3. Handle Signature File if present
         signature_url = None
-        if file:
+        if firma_medico_evaluador:
             try:
                 # Generate unique filename
-                filename_str = file.filename or "signature.png"
+                filename_str = firma_medico_evaluador.filename or "signature.png"
                 file_ext = os.path.splitext(filename_str)[1]
                 filename = f"sig_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 
                 with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
+                    shutil.copyfileobj(firma_medico_evaluador.file, buffer)
                 
                 # Construct URL
                 # If DOMAIN_URL ends with /, don't add another.
@@ -129,6 +133,26 @@ async def create_medical_record(
                 # User requirement said "pide una imagen para luego guardarla". 
                 # If it fails, maybe we should fail.
                 raise HTTPException(status_code=500, detail=f"Error saving signature file: {str(e)}")
+
+        # 3a. Handle Laboral Signature File if present
+        laboral_signature_url = None
+        if firma_medico_laboral:
+            try:
+                # Generate unique filename
+                filename_str = firma_medico_laboral.filename or "signature_laboral.png"
+                file_ext = os.path.splitext(filename_str)[1]
+                filename = f"sig_lab_{uuid.uuid4()}{file_ext}"
+                file_path = SIGNATURES_DIR / filename
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(firma_medico_laboral.file, buffer)
+                
+                # Construct URL
+                base_url = DOMAIN_URL.rstrip("/")
+                laboral_signature_url = f"{base_url}/{filename}"
+            except Exception as e:
+                print(f"Error saving laboral signature: {e}")
+                raise HTTPException(status_code=500, detail=f"Error saving laboral signature file: {str(e)}")
 
         # 3b. Handle Data Image File if present
         data_img_url = None
@@ -195,12 +219,9 @@ async def create_medical_record(
         if request_model.medical_record_data:
              data_dict = request_model.medical_record_data.model_dump(exclude_unset=True)
              if data_dict:
-                 # Check if ID provided or generate
-                 if "id" not in data_dict or not data_dict["id"]:
-                    mr_data_id = str(uuid.uuid4())
-                    data_dict["id"] = mr_data_id
-                 else:
-                    mr_data_id = data_dict["id"]
+                 # Always generate a new ID for the new record data, ignoring client input to prevent collisions
+                 mr_data_id = str(uuid.uuid4())
+                 data_dict["id"] = mr_data_id
                  
                  data_dict["medical_record_id"] = record_id
                  
@@ -225,6 +246,10 @@ async def create_medical_record(
         for field_name, field_value in model_dump.items():
             if field_name == "medical_record_signatures": 
                 continue 
+            
+            if field_name == "medical_record_laboral_signatures":
+                continue
+
             
             if field_name == "medical_record_data":
                 continue # Already handled
@@ -258,7 +283,7 @@ async def create_medical_record(
         if sig_data or signature_url: # Only insert if we have something
             sig_data["id"] = str(uuid.uuid4())
             sig_data["medical_record_id"] = record_id
-            sig_data["created_at"] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            sig_data["created_at"] = fecha_medico_evaluador
             
             # Get professional ID
             prof_id = None
@@ -277,6 +302,31 @@ async def create_medical_record(
                 VALUES ({', '.join(values_placeholders)})
             """
             db.execute(text(query), sig_data)
+
+        # 7. Insert Laboral Signature
+        lab_sig_data = model_dump.get("medical_record_laboral_signatures", {}) or {}
+        if laboral_signature_url:
+             lab_sig_data["url"] = laboral_signature_url
+        
+        if lab_sig_data or laboral_signature_url:
+            lab_sig_data["id"] = str(uuid.uuid4())
+            lab_sig_data["medical_record_id"] = record_id
+            lab_sig_data["created_at"] = fecha_medico_laboral # Use the laboral date
+            
+            # Get professional ID
+            prof_id = None
+            if current_user.role == "professional":
+                prof_id = _get_professional_id(db, current_user.id)
+            if prof_id:
+                 lab_sig_data["professional_id"] = prof_id
+            
+            columns = list(lab_sig_data.keys())
+            values_placeholders = [f":{col}" for col in columns]
+            query = f"""
+                INSERT INTO medical_record_laboral_signatures ({', '.join(columns)})
+                VALUES ({', '.join(values_placeholders)})
+            """
+            db.execute(text(query), lab_sig_data)
 
         db.commit()
         return {"id": record_id, "detail": "Medical record created successfully"}
@@ -315,7 +365,7 @@ async def get_medical_records_by_patient(
             "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
-            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys"
+            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures"
         ]
         
         for rec in records:
@@ -391,7 +441,7 @@ async def delete_medical_record(
             "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
-            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys"
+            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures"
         ]
         
         # 1. Handle deep nested first: medical_record_data_img
@@ -425,7 +475,10 @@ async def update_medical_record(
     record_id: str,
     patient_id: str = Form(...), # Recibe el patient id tambien
     data: Json[MedicalRecordFullRequest] = Form(...),
-    file: UploadFile = File(None),
+    firma_medico_evaluador: UploadFile = File(None),
+    fecha_medico_evaluador: Optional[date] = Form(None),
+    firma_medico_laboral: UploadFile = File(None),
+    fecha_medico_laboral: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     # This is similar to Create but Update.
@@ -459,6 +512,10 @@ async def update_medical_record(
         for field_name, field_value in model_dump.items():
             if field_name == "medical_record_signatures":
                 continue # Skip signatures in general loop
+                
+            if field_name == "medical_record_laboral_signatures":
+                continue
+                
             if field_name == "medical_record_data_img":
                 continue # Skip for now
                 
@@ -492,7 +549,7 @@ async def update_medical_record(
                     db.execute(text(query), field_value)
         
         # Handle Signature Update (New file replaces old)
-        if file:
+        if firma_medico_evaluador:
             try:
                 # 1. Check for existing signature
                 existing_sig = db.execute(
@@ -520,13 +577,13 @@ async def update_medical_record(
                     )
 
                 # 2. Save new file
-                filename_str = file.filename or "signature.png"
+                filename_str = firma_medico_evaluador.filename or "signature.png"
                 file_ext = os.path.splitext(filename_str)[1]
                 filename = f"sig_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 
                 with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
+                    shutil.copyfileobj(firma_medico_evaluador.file, buffer)
                 
                 # Construct URL
                 base_url = DOMAIN_URL.rstrip("/")
@@ -545,7 +602,7 @@ async def update_medical_record(
                     "medical_record_id": record_id,
                     "url": signature_url,
                     "professional_id": prof_id,
-                    "created_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                    "created_at": fecha_medico_evaluador if fecha_medico_evaluador else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
                 }
                 
                 keys = list(sig_data.keys())
@@ -555,6 +612,68 @@ async def update_medical_record(
 
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Error processing signature update: {str(e)}")
+            
+        # Handle Laboral Signature Update
+        if firma_medico_laboral:
+            try:
+                # 1. Check for existing signature
+                existing_lab_sig = db.execute(
+                    text("SELECT id, url FROM medical_record_laboral_signatures WHERE medical_record_id = :rid"),
+                    {"rid": record_id}
+                ).mappings().first()
+
+                if existing_lab_sig:
+                    # Delete file
+                    if existing_lab_sig["url"]:
+                        try:
+                            old_filename = existing_lab_sig["url"].split("/")[-1]
+                            old_file_path = SIGNATURES_DIR / old_filename
+                            if old_file_path.exists():
+                                os.remove(old_file_path)
+                        except Exception as e:
+                            print(f"Error removing old laboral signature file: {e}")
+
+                    # Delete DB entry
+                    db.execute(
+                        text("DELETE FROM medical_record_laboral_signatures WHERE id = :id"),
+                        {"id": existing_lab_sig["id"]}
+                    )
+
+                # 2. Save new file
+                filename_str = firma_medico_laboral.filename or "signature_laboral.png"
+                file_ext = os.path.splitext(filename_str)[1]
+                filename = f"sig_lab_{uuid.uuid4()}{file_ext}"
+                file_path = SIGNATURES_DIR / filename
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(firma_medico_laboral.file, buffer)
+                
+                # Construct URL
+                base_url = DOMAIN_URL.rstrip("/")
+                laboral_signature_url = f"{base_url}/{filename}"
+
+                # 3. Insert new DB entry
+                new_lab_sig_id = str(uuid.uuid4())
+                
+                # Retrieve professional_id
+                prof_id = None
+                prof_id = _get_professional_id(db, current_user.id)
+
+                lab_sig_data = {
+                    "id": new_lab_sig_id,
+                    "medical_record_id": record_id,
+                    "url": laboral_signature_url,
+                    "professional_id": prof_id,
+                    "created_at": fecha_medico_laboral if fecha_medico_laboral else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                keys = list(lab_sig_data.keys())
+                vals = [f":{k}" for k in keys]
+                query = f"INSERT INTO medical_record_laboral_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"
+                db.execute(text(query), lab_sig_data)
+
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error processing laboral signature update: {str(e)}")
             
         db.commit()
         return {"detail": "Updated successfully"}

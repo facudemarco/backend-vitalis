@@ -340,6 +340,13 @@ class MedicalRecordSignatures(BaseModel):
     professional_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
+class MedicalRecordLaboralSignatures(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    url: Optional[str] = None
+    professional_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+
 class MedicalRecordSkinExam(BaseModel):
     id: Optional[str] = None
     medical_record_id: Optional[str] = None
@@ -466,6 +473,7 @@ class MedicalRecordFullResponse(BaseModel):
     medical_record_recomendations: Optional[MedicalRecordRecomendations] = Field(None, description="**Medical Record Recomendations**")
     medical_record_respiratorio_exam: Optional[MedicalRecordRespiratorioExam] = Field(None, description="**Medical Record Respiratorio Exam**")
     medical_record_signatures: Optional[MedicalRecordSignatures] = Field(None, description="**Medical Record Signatures**")
+    medical_record_laboral_signatures: Optional[MedicalRecordLaboralSignatures] = Field(None, description="**Medical Record Laboral Signatures**")
     medical_record_skin_exam: Optional[MedicalRecordSkinExam] = Field(None, description="**Medical Record Skin Exam**")
     medical_record_studies: Optional[MedicalRecordStudies] = Field(None, description="**Medical Record Studies**")
     medical_record_surgerys: Optional[MedicalRecordSurgerys] = Field(None, description="**Medical Record Surgerys**")
