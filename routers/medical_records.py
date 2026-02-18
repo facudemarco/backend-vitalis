@@ -213,12 +213,13 @@ async def create_medical_record(
         # Helper to insert generic sub-table
         def insert_sub_table(table_name: str, data_dict: dict, inject_medical_record_id: bool = True):
             if not data_dict:
-                return
+                 return
             
             # Prepare data
             data_dict["id"] = str(uuid.uuid4())
             if inject_medical_record_id:
                 data_dict["medical_record_id"] = record_id
+            
             
             # Construct Query dynamically
             columns = list(data_dict.keys())
@@ -281,12 +282,15 @@ async def create_medical_record(
                      # Remove medical_record_id if Pydantic added it (it shouldn't have it in model? check model)
                      # Model: MedicalRecordDataImg(id, medical_record_data_id, url)
                      # It does NOT have medical_record_id. Good.
-                     
+                if field_value:
                      insert_sub_table(field_name, field_value, inject_medical_record_id=False)
                 continue
 
             if field_value:
-                 insert_sub_table(field_name, field_value)
+                 try:
+                     insert_sub_table(field_name, field_value)
+                 except Exception as e:
+                     raise e
 
         # 6. Insert Signature
         # Logic: 
@@ -368,12 +372,14 @@ async def get_medical_records_by_patient(
         raise HTTPException(status_code=500, detail="Database connection error")
         
     try:
+
         # Get all parent records
         records = db.execute(
             text("SELECT id, patient_id FROM medical_record WHERE patient_id = :pid"),
             {"pid": patient_id}
         ).mappings().all()
         
+
         response_list = []
         
         table_names = [
@@ -392,42 +398,56 @@ async def get_medical_records_by_patient(
             full_rec = dict(rec) # Start with id, patient_id
             
             # For each sub-table, fetch the row
+            # For each sub-table, fetch the row
+            print(f"Fetching sub-tables for medical_record_id: {rec['id']}") # DEBUG log
+            
             for table in table_names:
-                # Some tables might have multiple entries? 
-                # Based on the singular naming in Pydantic models (Optional[Model]), we assume 1:1 for most.
-                # But 'medical_record_signatures' could be many?
-                # The prompt implies "Giant JSON" structure which usually matches the model hierarchy.
-                # If the models have `Optional[Model]`, it implies 1:1.
-                # If `List[Model]`, it implies 1:N.
-                # My generated models use `Optional[MedicalRecord...]` for all tables.
-                # So I will fetch .first()
-                
-                # Exception: `medical_record_data_img` links to `medical_record_data`.
-                # If I fetch it here linking to `medical_record_id`, it will fail if the column doesn't exist.
-                # `medical_record_data_img` has `medical_record_data_id` NOT `medical_record_id`.
-                # So we can't fetch it directly with `medical_record_id`.
-                # We need to fetch it via `medical_record_data`.
-                
                 if table == "medical_record_data_img":
                     continue # handled with data
                 
-                row = db.execute(
-                    text(f"SELECT * FROM {table} WHERE medical_record_id = :rid LIMIT 1"),
-                    {"rid": rec["id"]}
-                ).mappings().first()
+                # Ensure record_id is string
+                rec_id_str = str(rec["id"])
                 
-                if row:
-                    full_rec[table] = dict(row)
+                try:
+                    row = db.execute(
+                        text(f"SELECT * FROM {table} WHERE medical_record_id = :rid LIMIT 1"),
+                        {"rid": rec_id_str}
+                    ).mappings().first()
+                    
+                    if row:
+                        row_dict = dict(row)
+                        # Ensure ID is string
+                        if "id" in row_dict:
+                           row_dict["id"] = str(row_dict["id"])
+                        full_rec[table] = row_dict
+                    else:
+                        print(f"Table {table}: No record found for medical_record_id={rec_id_str}") # DEBUG log
+                except Exception as e:
+                    print(f"Error fetching table {table} for medical_record_id={rec_id_str}: {e}") # DEBUG log
             
             # Handle medical_record_data_img
             if "medical_record_data" in full_rec and full_rec["medical_record_data"]:
-                data_id = full_rec["medical_record_data"]["id"]
-                img_row = db.execute(
-                    text("SELECT * FROM medical_record_data_img WHERE medical_record_data_id = :did LIMIT 1"),
-                    {"did": data_id}
-                ).mappings().first()
-                if img_row:
-                    full_rec["medical_record_data_img"] = dict(img_row)
+                data_dict = full_rec["medical_record_data"]
+                # Ensure existing data ID is string
+                data_id = str(data_dict["id"])
+                
+                print(f"Fetching image for data_id: {data_id}") # DEBUG log
+                
+                try:
+                    img_row = db.execute(
+                        text("SELECT * FROM medical_record_data_img WHERE medical_record_data_id = :did LIMIT 1"),
+                        {"did": data_id}
+                    ).mappings().first()
+                    
+                    if img_row:
+                        img_dict = dict(img_row)
+                        if "id" in img_dict:
+                            img_dict["id"] = str(img_dict["id"])
+                        full_rec["medical_record_data_img"] = img_dict
+                    else:
+                        print(f"No image found for medical_record_data_id={data_id}")
+                except Exception as e:
+                    print(f"Error fetching image for data_id={data_id}: {e}")
                     
             response_list.append(full_rec)
             
@@ -572,25 +592,52 @@ async def update_medical_record(
             if field_name == "medical_record_data":
                 # Verificamos si existe
                 existing_data = db.execute(text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
-                
                 if existing_data:
-                    mr_data_id = existing_data["id"] # Guardamos ID existente
-                    # ... lógica de update estándar ...
+                    mr_data_id = str(existing_data["id"]) 
                 else:
-                    # ... lógica de insert estándar ...
-                    # Si insertas uno nuevo, asegúrate de guardar el nuevo ID en mr_data_id
-                    pass
-            
-            # ... (Aquí va tu lógica original del loop update/insert de tablas genéricas) ...
-            # NOTA: Asegúrate de que si field_name == "medical_record_data", asignes mr_data_id = field_value["id"] o el ID que recuperes.
+                    # New ID if inserted
+                    mr_data_id = str(uuid.uuid4())
 
-            # PEGAR AQUÍ TU LÓGICA DE UPDATE/INSERT DE SUBTABLAS EXISTENTE
-            # (Resumida para brevedad, pero usa tu código original del bloque `for field_name...`)
             if field_value:
-                 # ... tu logica existente ...
-                 pass
+                 # Check existence
+                 existing_sub = db.execute(
+                     text(f"SELECT id FROM {field_name} WHERE medical_record_id = :rid LIMIT 1"),
+                     {"rid": record_id}
+                 ).mappings().first()
 
-        # Si no encontramos mr_data_id en el loop (porque no venía en el JSON), lo buscamos ahora
+                 if existing_sub:
+                     # UPDATE
+                     # Remove 'id' and 'medical_record_id' from update dict to avoid modifying PK/FK
+                     update_data = {k: v for k, v in field_value.items() if k not in ["id", "medical_record_id"]}
+                     
+                     if update_data:
+                         set_clause = ", ".join([f"{k} = :{k}" for k in update_data.keys()])
+                         update_data["rid"] = record_id
+                         
+                         try:
+                             db.execute(text(f"UPDATE {field_name} SET {set_clause} WHERE medical_record_id = :rid"), update_data)
+                         except Exception as e:
+                             print(f"Error updating {field_name}: {e}")
+                             raise e
+                 else:
+                     # INSERT
+                     insert_data = field_value.copy()
+                     insert_data["id"] = str(uuid.uuid4())
+                     
+                     # Check if we already have an ID for medical_record_data
+                     if field_name == "medical_record_data" and mr_data_id:
+                          insert_data["id"] = mr_data_id
+
+                     insert_data["medical_record_id"] = record_id
+                     
+                     cols = ", ".join(insert_data.keys())
+                     vals = ", ".join([f":{k}" for k in insert_data.keys()])
+                     
+                     try:
+                         db.execute(text(f"INSERT INTO {field_name} ({cols}) VALUES ({vals})"), insert_data)
+                     except Exception as e:
+                         print(f"Error inserting {field_name}: {e}")
+                         raise e
         if not mr_data_id:
             existing_data_row = db.execute(text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
             if existing_data_row:
