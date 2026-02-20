@@ -244,7 +244,7 @@ async def update_user(
 # ==================== DELETE USER ====================
 
 @router.delete("/{user_id}", tags=["Admin - Users"])
-async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
+async def deactivate_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
     """Delete: marca usuario como inactivo (solo admin)"""
     db = getConnectionForLogin()
     if db is None:
@@ -255,7 +255,35 @@ async def delete_user(user_id: str, current_user: User = Depends(require_roles("
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Eliminar registros dependientes
+        user.is_active = False
+        db.commit()
+        
+        return {
+            "detail": "User deactivated successfully",
+            "user_id": user_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deactivating user: " + str(e))
+    finally:
+        db.close()
+
+@router.delete("/delete/{user_id}", tags=["Admin - Users"])
+async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
+    """Delete: eliminar usuario (solo admin) desvinculando de tablas dependientes"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        db.execute(text("SET SESSION foreign_key_checks = 0;"))
+        
         db.execute(text("DELETE FROM patients WHERE user_id = :uid"), {"uid": user_id})
         db.execute(text("DELETE FROM professionals WHERE user_id = :uid"), {"uid": user_id})
         db.execute(text("DELETE FROM companies WHERE owner_user_id = :uid"), {"uid": user_id})
@@ -271,7 +299,11 @@ async def delete_user(user_id: str, current_user: User = Depends(require_roles("
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error deleting user" + str(e))
+        raise HTTPException(status_code=500, detail="Error deleting user: " + str(e))
     finally:
+        try:
+            db.execute(text("SET SESSION foreign_key_checks = 1;"))
+            db.commit()
+        except:
+            pass
         db.close()
-        
