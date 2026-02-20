@@ -10,3 +10,4 @@ signatures/
 test_bool_model.py
 studies_admin/
 studies/
+tests/
