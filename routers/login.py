@@ -221,6 +221,7 @@ async def register_professional(
     email: str = Form(...),
     password: str = Form(...),
     license_number: str = Form(...),
+    profesion: str = Form(...),
     speciality: str = Form(...),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
@@ -259,13 +260,14 @@ async def register_professional(
         # Crear registro en tabla professionals
         db.execute(
             text("""
-                INSERT INTO professionals (id, user_id, license_number, speciality, phone)
-                VALUES (:id, :user_id, :license, :speciality, :phone)
+                INSERT INTO professionals (id, user_id, license_number, profesion, speciality, phone)
+                VALUES (:id, :user_id, :license, :profesion, :speciality, :phone)
             """),
             {
                 "id": professional_id,
                 "user_id": user_id,
                 "license": license_number,
+                "profesion": profesion,
                 "speciality": speciality,
                 "phone": phone,
             }
