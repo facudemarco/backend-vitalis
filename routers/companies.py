@@ -155,3 +155,48 @@ async def create_employee(
         raise HTTPException(status_code=500, detail="Error creating employee")
     finally:
         db.close()
+
+# ==================== DELETE EMPLOYEE (PATIENT) ====================
+
+@router.delete("/{company_id}/employees/{patient_id}", tags=["Companies"])
+async def delete_employee(
+    company_id: str,
+    patient_id: str,
+    current_user: User = Depends(require_active_user)
+):
+    """Eliminar paciente (employee) (admin y company owner)"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        # Validar que la empresa exista
+        company = db.execute(text("""
+            SELECT id, owner_user_id FROM companies WHERE id = :id
+        """), {"id": company_id}).mappings().first()
+        
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+        
+        # Si es company, validar que sea owner
+        if current_user.role == "company" and company["owner_user_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only delete employees for your own company")
+        
+        # Eliminar paciente
+        db.execute(text("""
+            DELETE FROM patients WHERE id = :id
+        """), {"id": patient_id})
+        db.commit()
+        
+        return {
+            "detail": "Employee deleted successfully",
+            "patient_id": patient_id,
+            "company_id": company_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deleting employee")
+    finally:
+        db.close()
