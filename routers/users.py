@@ -75,6 +75,7 @@ async def get_professionals(current_user: User = Depends(require_roles("admin"))
                 "dni": u.dni,
                 "date_of_birth": u.date_of_birth,
                 "license_number": p.license_number,
+                "profesion": p.profesion,
                 "email": u.email,
                 "speciality": p.speciality,
                 "phone": p.phone,
@@ -184,6 +185,145 @@ async def get_users_by_role(role: str, current_user: User = Depends(require_role
 
 
     
+# ==================== UPDATE EXTENDED PROFILES ====================
+
+from fastapi import Form
+
+@router.put("/admin/{user_id}", tags=["Admin - Users"])
+async def update_admin_profile(
+    user_id: str,
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    phone: str = Form(default=""),
+    dni: str = Form(default=""),
+    date_of_birth: str = Form(default=""),
+    current_user: User = Depends(require_roles("admin"))
+):
+    """Actualiza la informacion del admin en la tabla base users"""
+    db = getConnectionForLogin()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection error")
+        
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+             
+        user.first_name = first_name
+        user.last_name = last_name
+        user.phone = phone
+        user.dni = dni
+        user.date_of_birth = date_of_birth
+        
+        db.commit()
+        return {"detail": "Admin profile updated successfully", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating profile: " + str(e))
+    finally:
+        db.close()
+
+@router.put("/patient/{user_id}", tags=["Admin - Users"])
+async def update_patient_profile(
+    user_id: str,
+    address: str = Form(default=""),
+    social_security: str = Form(default=""),
+    current_user: User = Depends(require_roles("admin"))
+):
+    """Actualiza la informacion en la tabla patients"""
+    db = getConnectionForLogin()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection error")
+        
+    try:
+        db.execute(text("""
+            UPDATE patients
+            SET address = :address, social_security = :social_security
+            WHERE user_id = :uid
+        """), {"address": address, "social_security": social_security, "uid": user_id})
+        db.commit()
+        return {"detail": "Patient profile updated successfully", "user_id": user_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating patient: " + str(e))
+    finally:
+        db.close()
+        
+@router.put("/professional/{user_id}", tags=["Admin - Users"])
+async def update_professional_profile(
+    user_id: str,
+    license_number: str = Form(default=""),
+    profesion: str = Form(default=""),
+    speciality: str = Form(default=""),
+    phone: str = Form(default=""),
+    current_user: User = Depends(require_roles("admin"))
+):
+    """Actualiza la informacion en la tabla professionals (incluye profesion)"""
+    db = getConnectionForLogin()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection error")
+        
+    try:
+        db.execute(text("""
+            UPDATE professionals
+            SET license_number = :license_number, profesion = :profesion,
+                speciality = :speciality, phone = :phone
+            WHERE user_id = :uid
+        """), {
+            "license_number": license_number,
+            "profesion": profesion,
+            "speciality": speciality,
+            "phone": phone,
+            "uid": user_id
+        })
+        db.commit()
+        return {"detail": "Professional profile updated successfully", "user_id": user_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating professional: " + str(e))
+    finally:
+        db.close()
+
+@router.put("/company/{user_id}", tags=["Admin - Users"])
+async def update_company_profile(
+    user_id: str,
+    name: str = Form(default=""),
+    responsable_name: str = Form(default=""),
+    cuit: str = Form(default=""),
+    phone: str = Form(default=""),
+    address: str = Form(default=""),
+    current_user: User = Depends(require_roles("admin"))
+):
+    """Actualiza la informacion en la tabla companies usando el owner_user_id"""
+    db = getConnectionForLogin()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection error")
+        
+    try:
+        db.execute(text("""
+            UPDATE companies
+            SET name = :name, responsable_name = :responsable_name, cuit = :cuit,
+                phone = :phone, address = :address
+            WHERE owner_user_id = :uid
+        """), {
+            "name": name,
+            "responsable_name": responsable_name,
+            "cuit": cuit,
+            "phone": phone,
+            "address": address,
+            "uid": user_id
+        })
+        db.commit()
+        return {"detail": "Company profile updated successfully", "user_id": user_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating company: " + str(e))
+    finally:
+        db.close()
+
+
 # ==================== PATCH USER ====================
 
 @router.patch("/{user_id}", tags=["Admin - Users"])
@@ -244,7 +384,7 @@ async def update_user(
 # ==================== DELETE USER ====================
 
 @router.delete("/{user_id}", tags=["Admin - Users"])
-async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
+async def deactivate_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
     """Delete: marca usuario como inactivo (solo admin)"""
     db = getConnectionForLogin()
     if db is None:
@@ -255,7 +395,35 @@ async def delete_user(user_id: str, current_user: User = Depends(require_roles("
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Eliminar registros dependientes
+        user.is_active = False
+        db.commit()
+        
+        return {
+            "detail": "User deactivated successfully",
+            "user_id": user_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deactivating user: " + str(e))
+    finally:
+        db.close()
+
+@router.delete("/delete/{user_id}", tags=["Admin - Users"])
+async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
+    """Delete: eliminar usuario (solo admin) desvinculando de tablas dependientes"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        db.execute(text("SET SESSION foreign_key_checks = 0;"))
+        
         db.execute(text("DELETE FROM patients WHERE user_id = :uid"), {"uid": user_id})
         db.execute(text("DELETE FROM professionals WHERE user_id = :uid"), {"uid": user_id})
         db.execute(text("DELETE FROM companies WHERE owner_user_id = :uid"), {"uid": user_id})
@@ -271,7 +439,11 @@ async def delete_user(user_id: str, current_user: User = Depends(require_roles("
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error deleting user" + str(e))
+        raise HTTPException(status_code=500, detail="Error deleting user: " + str(e))
     finally:
+        try:
+            db.execute(text("SET SESSION foreign_key_checks = 1;"))
+            db.commit()
+        except:
+            pass
         db.close()
-        

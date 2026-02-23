@@ -84,7 +84,9 @@ class MedicalRecordEvaluationType(BaseModel):
     periodic_exams: Optional[bool] = None
     laboral_change_position: Optional[bool] = None
     sport_physical_aptitude: Optional[bool] = None
+    other_boolean: Optional[bool] = None
     other: Optional[str] = None
+
 
 class MedicalRecordFamilyHistory(BaseModel):
     id: Optional[str] = None
@@ -280,6 +282,7 @@ class MedicalRecordPreviousProblems(BaseModel):
     palpitations: Optional[bool] = None
     high_or_low_pressure: Optional[bool] = None
     digestive_problems: Optional[bool] = None
+    others_boolean: Optional[bool] = None
     others: Optional[str] = None
     hepatitis: Optional[bool] = None
     hernias: Optional[bool] = None
@@ -395,6 +398,50 @@ class MedicalRecordSurgerys(BaseModel):
     others: Optional[bool] = None
     others_date: Optional[str] = None
 
+class MedicalRecordCuestionarioRiesgos(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    company: Optional[str] = None
+    complete_name: Optional[str] = None
+    dni: Optional[int] = None
+    age: Optional[int] = None
+    weight: Optional[float] = None
+
+class MedicalRecordDdjj(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    last_year_mareos_vertigo_desmayos: Optional[bool] = None
+    pico_presion_arterial: Optional[bool] = None
+    golpe_severo_craneo: Optional[bool] = None
+    trastornos_depresivos_fobias: Optional[bool] = None
+    inseguridad_trabajos_altura: Optional[bool] = None
+    epilepsias_convulsiones: Optional[bool] = None
+    medicacion_neurologica: Optional[bool] = None
+    hipoglucemia: Optional[bool] = None
+    caidas: Optional[bool] = None
+    inseguridad_conduccion: Optional[bool] = None
+    observations: Optional[str] = None
+
+class MedicalRecordNeuroMedicalExam(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    test_dedo_nariz_normal: Optional[bool] = None
+    test_dedo_nariz_anormal: Optional[bool] = None
+    test_dedo_nariz_description: Optional[str] = None
+    test_romberg_normal: Optional[bool] = None
+    test_romberg_anormal: Optional[bool] = None
+    test_romberg_description: Optional[str] = None
+    test_seguimiento_ocular_normal: Optional[bool] = None
+    test_seguimiento_ocular_anormal: Optional[bool] = None
+    test_seguimiento_ocular_description: Optional[str] = None
+    exam_miembro_sup_normal: Optional[bool] = None
+    exam_miembro_sup_anormal: Optional[bool] = None
+    exam_miembro_sup_description: Optional[str] = None
+    exam_miembro_inf_normal: Optional[bool] = None
+    exam_miembro_inf_anormal: Optional[bool] = None
+    exam_miembro_inf_description: Optional[str] = None
+
+
 # -------------------------------------------------------------------
 # Request / Response Unificados
 # -------------------------------------------------------------------
@@ -431,6 +478,9 @@ class MedicalRecordFullRequest(BaseModel):
     medical_record_skin_exam: Optional[MedicalRecordSkinExam] = Field(None, description="**Medical Record Skin Exam**")
     medical_record_studies: Optional[MedicalRecordStudies] = Field(None, description="**Medical Record Studies**")
     medical_record_surgerys: Optional[MedicalRecordSurgerys] = Field(None, description="**Medical Record Surgerys**")
+    medical_record_cuestionario_riesgos: Optional[MedicalRecordCuestionarioRiesgos] = Field(None, description="** Medical Record Cuestionario Riesgos")
+    medical_record_ddjj: Optional[MedicalRecordDdjj] = Field(None, description="** Medical Record DDJJ")
+    medical_record_neuro_medical_exam: Optional[MedicalRecordNeuroMedicalExam] = Field(None, description="**Medical Record Neuro Medical Exam**")
 
     @model_validator(mode='before')
     @classmethod
@@ -441,7 +491,6 @@ class MedicalRecordFullRequest(BaseModel):
             except json.JSONDecodeError as e:
                 raise ValueError(f"Invalid JSON string: {e}")
         return value
-
 
 class MedicalRecordFullResponse(BaseModel):
     id: str
@@ -477,3 +526,6 @@ class MedicalRecordFullResponse(BaseModel):
     medical_record_skin_exam: Optional[MedicalRecordSkinExam] = Field(None, description="**Medical Record Skin Exam**")
     medical_record_studies: Optional[MedicalRecordStudies] = Field(None, description="**Medical Record Studies**")
     medical_record_surgerys: Optional[MedicalRecordSurgerys] = Field(None, description="**Medical Record Surgerys**")
+    medical_record_ddjj: Optional[MedicalRecordDdjj] = Field(None, description="**Medical Record DDJJ**")
+    medical_record_cuestionario_riesgos: Optional[MedicalRecordCuestionarioRiesgos] = Field(None, description="**Medical Record Cuestionario Riesgos**")
+    medical_record_neuro_medical_exam: Optional[MedicalRecordNeuroMedicalExam] = Field(None, description="**Medical Record Neuro Medical Exam**")
