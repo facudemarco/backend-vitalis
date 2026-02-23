@@ -102,9 +102,9 @@ async def create_medical_record(
     data: Json[MedicalRecordFullRequest] = Form(...),
     data_img: UploadFile = File(None),
     firma_medico_evaluador: UploadFile = File(None),
-    fecha_medico_evaluador: date = Form(...),
+    fecha_medico_evaluador: Optional[date] = Form(None),
     firma_medico_laboral: UploadFile = File(None),
-    fecha_medico_laboral: date = Form(...),
+    fecha_medico_laboral: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     """

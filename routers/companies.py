@@ -198,7 +198,6 @@ async def delete_employee(
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        # Validar que la empresa exista
         company = db.execute(text("""
             SELECT id, owner_user_id FROM companies WHERE id = :id
         """), {"id": company_id}).mappings().first()
@@ -206,14 +205,40 @@ async def delete_employee(
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
         
-        # Si es company, validar que sea owner
         if current_user.role == "company" and company["owner_user_id"] != current_user.id:
             raise HTTPException(status_code=403, detail="You can only delete employees for your own company")
         
-        # Eliminar paciente
-        db.execute(text("""
-            DELETE FROM patients WHERE id = :id
-        """), {"id": patient_id})
+        patient_row = db.execute(
+            text("SELECT user_id FROM patients WHERE id = :id"),
+            {"id": patient_id}
+        ).mappings().first()
+
+        if not patient_row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        linked_user_id = patient_row["user_id"]
+
+        medical_records = db.execute(
+            text("SELECT id FROM medical_record WHERE patient_id = :pid"),
+            {"pid": patient_id}
+        ).mappings().all()
+
+        for mr in medical_records:
+            mr_id = mr["id"]
+            study_ids = db.execute(
+                text("SELECT id FROM studies WHERE medical_record_id = :mrid"),
+                {"mrid": mr_id}
+            ).mappings().all()
+            for s in study_ids:
+                db.execute(text("DELETE FROM study_files WHERE study_id = :sid"), {"sid": s["id"]})
+            db.execute(text("DELETE FROM studies WHERE medical_record_id = :mrid"), {"mrid": mr_id})
+            db.execute(text("DELETE FROM medical_record WHERE id = :mrid"), {"mrid": mr_id})
+
+        db.execute(text("DELETE FROM patients WHERE id = :id"), {"id": patient_id})
+
+        if linked_user_id:
+            db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": linked_user_id})
+
         db.commit()
         
         return {
