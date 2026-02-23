@@ -93,6 +93,8 @@ async def get_company_by_id(company_id: str, current_user: User = Depends(requir
 @router.post("/{company_id}/employees", tags=["Companies"])
 async def create_employee(
     company_id: str,
+    email: str = Form(...),
+    password: str = Form(...),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
     dni: str = Form(default=""),
@@ -100,9 +102,15 @@ async def create_employee(
     phone: str = Form(default=""),
     address: str = Form(default=""),
     social_security: str = Form(default=""),
+    study_type: str = Form(default=""),
     current_user: User = Depends(require_active_user)
 ):
-    """Crear paciente (employee) sin User (admin y company owner)"""
+    """
+    Crear empleado:
+    1) Crea el User en la tabla `users` con rol 'patient' (usando email y password).
+    2) Crea el registro en `patients` vinculado con el user_id recién creado.
+    Requiere rol admin o company owner.
+    """
     
     # Validar que sea admin o owner
     if current_user.role not in ("admin", "company"):
@@ -125,26 +133,62 @@ async def create_employee(
         if current_user.role == "company" and company["owner_user_id"] != current_user.id:
             raise HTTPException(status_code=403, detail="You can only create employees for your own company")
         
-        # Crear paciente
-        patient_id = str(uuid.uuid4())
+        # Verificar que el email no esté ya registrado
+        existing = db.execute(
+            text("SELECT id FROM users WHERE email = :email"),
+            {"email": email}
+        ).mappings().first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # 1) Crear el User en la tabla users con rol patient
+        from Database.users import hash_password
+        hashed_password = hash_password(password)
+        user_id = str(uuid.uuid4())
+        
         db.execute(text("""
-            INSERT INTO patients (id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id)
-            VALUES (:id, :first_name, :last_name, :dni, :date_of_birth, :phone, :address, :social_security, :company_id, NULL)
+            INSERT INTO users (id, email, hashed_password, first_name, last_name, dni, date_of_birth, phone, role, is_active)
+            VALUES (:id, :email, :hashed_password, :first_name, :last_name, :dni, :date_of_birth, :phone, 'patient', 1)
         """), {
-            "id": patient_id,
+            "id": user_id,
+            "email": email,
+            "hashed_password": hashed_password,
             "first_name": first_name,
             "last_name": last_name,
             "dni": dni,
             "date_of_birth": date_of_birth,
             "phone": phone,
+        })
+        
+        # 2) Crear el registro en patients vinculado al user_id recién creado
+        patient_id = str(uuid.uuid4())
+        
+        # Convertir DNI a int para la tabla patients
+        dni_int = 0
+        if dni and dni.isdigit():
+            dni_int = int(dni)
+        
+        db.execute(text("""
+            INSERT INTO patients (id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type)
+            VALUES (:id, :first_name, :last_name, :dni, :date_of_birth, :phone, :address, :social_security, :company_id, :user_id, :study_type)
+        """), {
+            "id": patient_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "dni": dni_int,
+            "date_of_birth": date_of_birth,
+            "phone": phone,
             "address": address,
             "social_security": social_security,
             "company_id": company_id,
+            "user_id": user_id,
+            "study_type": study_type,
         })
         db.commit()
         
         return {
             "detail": "Employee created successfully",
+            "user_id": user_id,
             "patient_id": patient_id,
             "company_id": company_id,
         }
@@ -152,7 +196,7 @@ async def create_employee(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error creating employee")
+        raise HTTPException(status_code=500, detail="Error creating employee: " + str(e))
     finally:
         db.close()
 
