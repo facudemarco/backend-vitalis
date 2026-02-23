@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from typing import Optional
 from models.user import User
 from auth.authentication import require_active_user
 from Database.getConnection import getConnectionForLogin
@@ -21,6 +22,7 @@ def _format_patient(row) -> dict:
         "social_security": row["social_security"],
         "company_id": row["company_id"],
         "user_id": row["user_id"],
+        "study_type": row["study_type"],
     }
 
 # ==================== GET PATIENTS ====================
@@ -43,7 +45,7 @@ async def get_patients(
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id FROM patients WHERE 1=1")
+        query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type FROM patients WHERE 1=1")
         params = {}
         
         # Filtrar según rol
@@ -72,7 +74,7 @@ async def get_patients(
             company_row = db.execute(text("SELECT id FROM companies WHERE owner_user_id = :user_id"), {"user_id": current_user.id}).mappings().first()
             if company_row:
                 params["company_id"] = company_row["id"]
-                query = text(f"SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id FROM patients WHERE company_id = :company_id")
+                query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type FROM patients WHERE company_id = :company_id")
         
         elif current_user.role == "professional":
             # Professional ve todos, puede filtrar por DNI
@@ -132,7 +134,7 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
     
     try:
         row = db.execute(text("""
-            SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id
+            SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type
             FROM patients
             WHERE id = :id
         """), {"id": patient_id}).mappings().first()
@@ -167,3 +169,98 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
     finally:
         db.close()
 
+
+# ==================== PUT PATIENT ====================
+
+@router.put("/{patient_id}", tags=["Patients"])
+async def update_patient(
+    patient_id: str,
+    first_name: Optional[str] = Body(None),
+    last_name: Optional[str] = Body(None),
+    dni: Optional[str] = Body(None),
+    date_of_birth: Optional[str] = Body(None),
+    phone: Optional[str] = Body(None),
+    address: Optional[str] = Body(None),
+    social_security: Optional[str] = Body(None),
+    company_id: Optional[str] = Body(None),
+    study_type: Optional[str] = Body(None),
+    current_user: User = Depends(require_active_user)
+):
+    """Actualizar datos de un paciente (incluye study_type).
+
+    - Admin: puede actualizar cualquier paciente
+    - Paciente mismo: solo sus propios datos
+    - Professional: puede editar cualquier paciente
+    - Company owner: solo pacientes de su empresa
+    """
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    try:
+        row = db.execute(
+            text("SELECT id, user_id, company_id FROM patients WHERE id = :id"),
+            {"id": patient_id}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # Control de acceso
+        if current_user.role == "admin":
+            pass
+        elif current_user.role == "patient":
+            if row["user_id"] != current_user.id:
+                raise HTTPException(status_code=403, detail="You can only edit your own patient data")
+        elif current_user.role == "professional":
+            pass
+        elif current_user.role == "company":
+            company_row = db.execute(
+                text("SELECT id FROM companies WHERE owner_user_id = :user_id"),
+                {"user_id": current_user.id}
+            ).mappings().first()
+            if not company_row or row["company_id"] != company_row["id"]:
+                raise HTTPException(status_code=403, detail="You can only edit patients from your own company")
+        else:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # Construir SET dinámico solo con campos enviados
+        fields = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "dni": dni,
+            "date_of_birth": date_of_birth,
+            "phone": phone,
+            "address": address,
+            "social_security": social_security,
+            "company_id": company_id,
+            "study_type": study_type,
+        }
+        updates = {k: v for k, v in fields.items() if v is not None}
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        set_clause = ", ".join([f"{k} = :{k}" for k in updates])
+        updates["patient_id"] = patient_id
+
+        db.execute(
+            text(f"UPDATE patients SET {set_clause} WHERE id = :patient_id"),
+            updates
+        )
+        db.commit()
+
+        updated = db.execute(
+            text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type FROM patients WHERE id = :id"),
+            {"id": patient_id}
+        ).mappings().first()
+
+        return _format_patient(updated)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating patient: " + str(e))
+    finally:
+        db.close()

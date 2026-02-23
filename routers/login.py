@@ -82,7 +82,8 @@ async def register_patient(
     last_name: str = Form(default=""),
     dni: str = Form(default=""),
     date_of_birth: str = Form(default=""),
-    phone: str = Form(default="")
+    phone: str = Form(default=""),
+    study_type: str = Form(default="")
 ):
     existing_user = get_user_by_email(email)
     if existing_user:
@@ -121,8 +122,8 @@ async def register_patient(
 
         db.execute(
             text("""
-                INSERT INTO patients (id, user_id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id)
-                VALUES (:id, :user_id, :first_name, :last_name, :dni, :date_of_birth, :phone, :address, :social_security, :company_id)
+                INSERT INTO patients (id, user_id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, study_type)
+                VALUES (:id, :user_id, :first_name, :last_name, :dni, :date_of_birth, :phone, :address, :social_security, :company_id, :study_type)
             """),
             {
                 "id": patient_id,
@@ -134,7 +135,8 @@ async def register_patient(
                 "phone": phone,
                 "address": "",
                 "social_security": "",
-                "company_id": None
+                "company_id": None,
+                "study_type": study_type
             }
         )
         db.commit()
