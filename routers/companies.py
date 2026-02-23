@@ -93,8 +93,6 @@ async def get_company_by_id(company_id: str, current_user: User = Depends(requir
 @router.post("/{company_id}/employees", tags=["Companies"])
 async def create_employee(
     company_id: str,
-    email: str = Form(...),
-    password: str = Form(...),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
     dni: str = Form(default=""),
@@ -133,29 +131,15 @@ async def create_employee(
         if current_user.role == "company" and company["owner_user_id"] != current_user.id:
             raise HTTPException(status_code=403, detail="You can only create employees for your own company")
         
-        # Verificar que el email no esté ya registrado
-        existing = db.execute(
-            text("SELECT id FROM users WHERE email = :email"),
-            {"email": email}
-        ).mappings().first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Email already registered")
-        
-        # 1) Crear el User en la tabla users con rol patient
-        from Database.users import hash_password
-        hashed_password = hash_password(password)
         user_id = str(uuid.uuid4())
-        
         db.execute(text("""
-            INSERT INTO users (id, email, hashed_password, first_name, last_name, dni, date_of_birth, phone, role, is_active)
-            VALUES (:id, :email, :hashed_password, :first_name, :last_name, :dni, :date_of_birth, :phone, 'patient', 1)
+            INSERT INTO users (id, first_name, last_name, dni, date_of_birth, phone, role, is_active)
+            VALUES (:id, :first_name, :last_name, :dni, :date_of_birth, :phone, 'patient', 1)
         """), {
-            "id": user_id,
-            "email": email,
-            "hashed_password": hashed_password,
+            "id": user_id,  
             "first_name": first_name,
             "last_name": last_name,
-            "dni": dni,
+            "dni": dni, 
             "date_of_birth": date_of_birth,
             "phone": phone,
         })
