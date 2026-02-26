@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from typing import Optional
 from models.user import User
-from auth.authentication import require_active_user
+from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
+import os
+from pathlib import Path
+import shutil
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
@@ -264,3 +267,187 @@ async def update_patient(
         raise HTTPException(status_code=500, detail="Error updating patient: " + str(e))
     finally:
         db.close()
+
+
+# ==================== DELETE PATIENT ====================
+
+# Paths mirrored from medical_records.py and studies.py
+_SIGNATURES_DIR_ENV = os.getenv("SIGNATURES_DIR")
+if _SIGNATURES_DIR_ENV:
+    _SIGNATURES_DIR = Path(_SIGNATURES_DIR_ENV)
+elif os.name == "posix":
+    _SIGNATURES_DIR = Path("/home/iweb/vitalis/data/signatures/")
+else:
+    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _SIGNATURES_DIR = Path(os.path.join(_BASE_DIR, "signatures"))
+
+_DATA_IMAGES_DIR_ENV = os.getenv("DATA_IMAGES_DIR")
+if _DATA_IMAGES_DIR_ENV:
+    _DATA_IMAGES_DIR = Path(_DATA_IMAGES_DIR_ENV)
+else:
+    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _DATA_IMAGES_DIR = Path(os.path.join(_BASE_DIR, "data_images"))
+
+_STUDIES_DIR = os.getenv("STUDIES_DIR", "/home/iweb/vitalis/data/studies/")
+if os.name != "posix" and not os.getenv("STUDIES_DIR"):
+    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _STUDIES_DIR = os.path.join(_BASE_DIR, "studies")
+
+
+def _delete_file_from_url(url: str, directory) -> None:
+    """Elimina un archivo físico dado su URL y directorio base."""
+    if not url:
+        return
+    try:
+        filename = url.split("/")[-1]
+        file_path = Path(directory) / filename
+        if file_path.exists():
+            os.remove(file_path)
+    except Exception as e:
+        print(f"Warning: could not delete file {url}: {e}")
+
+
+@router.delete("/{patient_id}", tags=["Patients"])
+async def delete_patient(
+    patient_id: str,
+    current_user: User = Depends(require_roles("admin"))
+):
+    """Eliminar un paciente y TODOS sus datos relacionados:
+    - medical_record (y todas sus sub-tablas + archivos físicos)
+    - studies (y study_files + archivos físicos)
+    - patients
+    - users (el usuario vinculado)
+    """
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    try:
+        # 1. Verificar que el paciente existe y obtener su user_id
+        patient_row = db.execute(
+            text("SELECT id, user_id FROM patients WHERE id = :pid"),
+            {"pid": patient_id}
+        ).mappings().first()
+
+        if not patient_row:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        user_id = patient_row["user_id"]
+
+        # ----------------------------------------------------------------
+        # 2. Eliminar todos los medical_records del paciente
+        # ----------------------------------------------------------------
+        medical_records = db.execute(
+            text("SELECT id FROM medical_record WHERE patient_id = :pid"),
+            {"pid": patient_id}
+        ).mappings().all()
+
+        mr_sub_tables = [
+            "medical_record_bucodental_exam", "medical_record_cardiovascular_exam",
+            "medical_record_clinical_exam", "medical_record_derivations",
+            "medical_record_digestive_exam", "medical_record_evaluation_type",
+            "medical_record_family_history", "medical_record_genitourinario_exam",
+            "medical_record_habits", "medical_record_head_exam",
+            "medical_record_immunizations", "medical_record_laboral_contacts",
+            "medical_record_laboral_exam", "medical_record_laboral_history",
+            "medical_record_neuro_clinical_exam", "medical_record_oftalmologico_exam",
+            "medical_record_orl_exam", "medical_record_osteoarticular_exam",
+            "medical_record_personal_history", "medical_record_previous_problems",
+            "medical_record_psychiatric_clinical_exam", "medical_record_recomendations",
+            "medical_record_respiratorio_exam", "medical_record_skin_exam",
+            "medical_record_studies", "medical_record_surgerys",
+            "medical_record_laboral_signatures", "medical_record_signatures",
+            "medical_record_cuestionario_riesgos", "medical_record_ddjj",
+            "medical_record_neuro_medical_exam",
+        ]
+
+        for mr in medical_records:
+            rid = str(mr["id"])
+
+            # A. Recolectar y borrar archivos físicos de firmas
+            for sig in db.execute(
+                text("SELECT url FROM medical_record_signatures WHERE medical_record_id = :rid"),
+                {"rid": rid}
+            ).mappings().all():
+                _delete_file_from_url(sig["url"], _SIGNATURES_DIR)
+
+            for l_sig in db.execute(
+                text("SELECT url FROM medical_record_laboral_signatures WHERE medical_record_id = :rid"),
+                {"rid": rid}
+            ).mappings().all():
+                _delete_file_from_url(l_sig["url"], _SIGNATURES_DIR)
+
+            # B. Recolectar y borrar archivos físicos de data images
+            for dr in db.execute(
+                text("SELECT id FROM medical_record_data WHERE medical_record_id = :rid"),
+                {"rid": rid}
+            ).mappings().all():
+                for img in db.execute(
+                    text("SELECT url FROM medical_record_data_img WHERE medical_record_data_id = :did"),
+                    {"did": dr["id"]}
+                ).mappings().all():
+                    _delete_file_from_url(img["url"], _DATA_IMAGES_DIR)
+                db.execute(
+                    text("DELETE FROM medical_record_data_img WHERE medical_record_data_id = :did"),
+                    {"did": dr["id"]}
+                )
+
+            # C. Borrar medical_record_data
+            db.execute(text("DELETE FROM medical_record_data WHERE medical_record_id = :rid"), {"rid": rid})
+
+            # D. Borrar todas las sub-tablas restantes
+            for table in mr_sub_tables:
+                db.execute(text(f"DELETE FROM {table} WHERE medical_record_id = :rid"), {"rid": rid})
+
+            # E. Borrar registro padre medical_record
+            db.execute(text("DELETE FROM medical_record WHERE id = :rid"), {"rid": rid})
+
+        # ----------------------------------------------------------------
+        # 3. Eliminar todos los studies del paciente
+        # ----------------------------------------------------------------
+        studies = db.execute(
+            text("SELECT id FROM studies WHERE patient_id = :pid"),
+            {"pid": patient_id}
+        ).mappings().all()
+
+        for study in studies:
+            sid = str(study["id"])
+
+            # Borrar archivos físicos
+            for f in db.execute(
+                text("SELECT file_path FROM study_files WHERE study_id = :sid"),
+                {"sid": sid}
+            ).mappings().all():
+                try:
+                    fname = os.path.basename(f["file_path"])
+                    local_path = os.path.join(_STUDIES_DIR, fname)
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                except Exception as e:
+                    print(f"Warning: could not delete study file: {e}")
+
+            db.execute(text("DELETE FROM study_files WHERE study_id = :sid"), {"sid": sid})
+            db.execute(text("DELETE FROM studies WHERE id = :sid"), {"sid": sid})
+
+        # ----------------------------------------------------------------
+        # 4. Eliminar el paciente
+        # ----------------------------------------------------------------
+        db.execute(text("DELETE FROM patients WHERE id = :pid"), {"pid": patient_id})
+
+        # ----------------------------------------------------------------
+        # 5. Eliminar el usuario vinculado (si existe)
+        # ----------------------------------------------------------------
+        if user_id:
+            db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": user_id})
+
+        db.commit()
+        return {"detail": "Patient and all related data deleted successfully", "patient_id": patient_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deleting patient: " + str(e))
+    finally:
+        db.close()
+
