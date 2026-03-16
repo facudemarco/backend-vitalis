@@ -103,6 +103,8 @@ async def create_medical_record(
     data_img: UploadFile = File(None),
     firma_medico_evaluador: UploadFile = File(None),
     fecha_medico_evaluador: Optional[date] = Form(None),
+    firma_paciente: UploadFile = File(None),
+    fecha_paciente: Optional[date] = Form(None),
     firma_medico_laboral: UploadFile = File(None),
     fecha_medico_laboral: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
@@ -193,6 +195,26 @@ async def create_medical_record(
             except Exception as e:
                 print(f"Error saving data image: {e}")
                 raise HTTPException(status_code=500, detail=f"Error saving data image file: {str(e)}")
+
+        # 3c. Handle Patient Signature File if present
+        patient_signature_url = None
+        if firma_paciente:
+            try:
+                # Generate unique filename
+                filename_str = firma_paciente.filename or "signature_paciente.png"
+                file_ext = os.path.splitext(filename_str)[1]
+                filename = f"sig_pat_{uuid.uuid4()}{file_ext}"
+                file_path = SIGNATURES_DIR / filename
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(firma_paciente.file, buffer)
+                
+                # Construct URL
+                base_url = DOMAIN_URL.rstrip("/")
+                patient_signature_url = f"{base_url}/{filename}"
+            except Exception as e:
+                print(f"Error saving patient signature: {e}")
+                raise HTTPException(status_code=500, detail=f"Error saving patient signature file: {str(e)}")
 
         # 4. Insert Main Record
         record_id = str(uuid.uuid4())
@@ -352,6 +374,31 @@ async def create_medical_record(
             """
             db.execute(text(query), lab_sig_data)
 
+        # 8. Insert Patient Signature
+        pat_sig_data = model_dump.get("medical_record_patient_signatures", {}) or {}
+        if patient_signature_url:
+            pat_sig_data["url"] = patient_signature_url
+        
+        if pat_sig_data or patient_signature_url:
+            pat_sig_data["id"] = str(uuid.uuid4())
+            pat_sig_data["medical_record_id"] = record_id
+            pat_sig_data["created_at"] = fecha_paciente # Use the patient date
+            
+            # Get professional ID
+            prof_id = None
+            if current_user.role == "professional":
+                prof_id = _get_professional_id(db, current_user.id)
+            if prof_id:
+                pat_sig_data["professional_id"] = prof_id
+            
+            columns = list(pat_sig_data.keys())
+            values_placeholders = [f":{col}" for col in columns]
+            query = f"""
+                INSERT INTO medical_record_patient_signatures ({', '.join(columns)})
+                VALUES ({', '.join(values_placeholders)})
+            """
+            db.execute(text(query), pat_sig_data)
+
         db.commit()
         return {"id": record_id, "detail": "Medical record created successfully"}
 
@@ -391,7 +438,7 @@ async def get_medical_records_by_patient(
             "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
-            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures", "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam"
+            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures", "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_patient_signatures"
         ]
         
         for rec in records:
@@ -481,6 +528,11 @@ async def delete_medical_record(
             {"rid": record_id}
         ).mappings().all()
 
+        patient_signatures = db.execute(
+            text("SELECT url FROM medical_record_patient_signatures WHERE medical_record_id = :rid"), 
+            {"rid": record_id}
+        ).mappings().all()
+
         # B. Buscar Data Images (Es mas complejo porque requiere join o subquery)
         # Primero buscamos los IDs de medical_record_data asociados a este record
         data_rows = db.execute(
@@ -505,6 +557,9 @@ async def delete_medical_record(
             
         for l_sig in laboral_signatures:
             delete_physical_file(l_sig["url"], SIGNATURES_DIR)
+        
+        for p_sig in patient_signatures:
+            delete_physical_file(p_sig["url"], SIGNATURES_DIR)
             
         for img_url in data_images_urls:
             delete_physical_file(img_url, DATA_IMAGES_DIR)
@@ -532,7 +587,7 @@ async def delete_medical_record(
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
             "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures",
-            "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam"
+            "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_patient_signatures"
         ]
         
         for table in table_names:
@@ -560,6 +615,8 @@ async def update_medical_record(
     fecha_medico_evaluador: Optional[date] = Form(None),
     firma_medico_laboral: UploadFile = File(None),
     fecha_medico_laboral: Optional[date] = Form(None),
+    firma_paciente: UploadFile = File(None),
+    fecha_paciente: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     request_model = data
@@ -586,7 +643,7 @@ async def update_medical_record(
         mr_data_id = None 
 
         for field_name, field_value in model_dump.items():
-            if field_name in ["medical_record_signatures", "medical_record_laboral_signatures", "medical_record_data_img"]:
+            if field_name in ["medical_record_signatures", "medical_record_laboral_signatures", "medical_record_patient_signatures", "medical_record_data_img"]:
                 continue 
 
             # Lógica especial para capturar el ID de medical_record_data
@@ -752,6 +809,42 @@ async def update_medical_record(
 
             except Exception as e:
                  raise HTTPException(status_code=500, detail=f"Error laboral signature update: {e}")
+
+        # -------------------------------------------------
+        # 4. Update FIRMA PACIENTE (Refactorizado)
+        # -------------------------------------------------
+        if firma_paciente:
+            try:
+                # A. Buscar vieja
+                existing_pat = db.execute(text("SELECT id, url FROM medical_record_patient_signatures WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
+                
+                # B. Borrar vieja
+                if existing_pat:
+                    delete_physical_file(existing_pat["url"], SIGNATURES_DIR) # Usando Helper
+                    db.execute(text("DELETE FROM medical_record_patient_signatures WHERE id = :id"), {"id": existing_pat["id"]})
+
+                # C. Guardar nueva
+                filename = f"sig_pat_{uuid.uuid4()}{os.path.splitext(firma_paciente.filename or '')[1]}"
+                file_path = SIGNATURES_DIR / filename
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(firma_paciente.file, buffer)
+
+                new_url = f"{DOMAIN_URL.rstrip('/')}/{filename}"
+                prof_id = _get_professional_id(db, current_user.id)
+
+                # D. Insertar
+                pat_data = {
+                    "id": str(uuid.uuid4()), "medical_record_id": record_id, "url": new_url,
+                    "professional_id": prof_id,
+                    "created_at": fecha_paciente if fecha_paciente else datetime.utcnow()
+                }
+                # ... Query de insert ...
+                keys = list(pat_data.keys())
+                vals = [f":{k}" for k in keys]
+                db.execute(text(f"INSERT INTO medical_record_patient_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"), pat_data)
+
+            except Exception as e:
+                 raise HTTPException(status_code=500, detail=f"Error paciente signature update: {e}")
 
         db.commit()
         return {"detail": "Updated successfully with file management"}

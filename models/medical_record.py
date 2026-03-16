@@ -115,6 +115,7 @@ class MedicalRecordGenitourinarioExam(BaseModel):
     women_alteraciones_mamarias: Optional[bool] = None
     women_alteraciones_ginecologicas: Optional[bool] = None
     women_fum: Optional[bool] = None
+    women_fum_date: Optional[str] = None
     women_dolores_menstruales: Optional[bool] = None
     women_flujos_alterados: Optional[bool] = None
     women_anticonceptivos: Optional[bool] = None
@@ -161,6 +162,8 @@ class MedicalRecordImmunizations(BaseModel):
     triple_adultos_tetanos: Optional[bool] = None
     hepatitis_a: Optional[bool] = None
     hepatitis_b: Optional[bool] = None
+    dengue: Optional[bool] = None
+    
 
 class MedicalRecordLaboralContacts(BaseModel):
     id: Optional[str] = None
@@ -349,6 +352,13 @@ class MedicalRecordLaboralSignatures(BaseModel):
     url: Optional[str] = None
     professional_id: Optional[str] = None
     created_at: Optional[datetime] = None
+    
+class MedicalRecordPatientSignatures(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    url: Optional[str] = None
+    patient_id: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 class MedicalRecordSkinExam(BaseModel):
     id: Optional[str] = None
@@ -523,6 +533,7 @@ class MedicalRecordFullResponse(BaseModel):
     medical_record_respiratorio_exam: Optional[MedicalRecordRespiratorioExam] = Field(None, description="**Medical Record Respiratorio Exam**")
     medical_record_signatures: Optional[MedicalRecordSignatures] = Field(None, description="**Medical Record Signatures**")
     medical_record_laboral_signatures: Optional[MedicalRecordLaboralSignatures] = Field(None, description="**Medical Record Laboral Signatures**")
+    medical_record_patient_signatures: Optional[MedicalRecordPatientSignatures] = Field(None, description="**Medical Record Patient Signatures**")
     medical_record_skin_exam: Optional[MedicalRecordSkinExam] = Field(None, description="**Medical Record Skin Exam**")
     medical_record_studies: Optional[MedicalRecordStudies] = Field(None, description="**Medical Record Studies**")
     medical_record_surgerys: Optional[MedicalRecordSurgerys] = Field(None, description="**Medical Record Surgerys**")
