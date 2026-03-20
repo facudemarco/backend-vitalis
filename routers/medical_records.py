@@ -65,6 +65,21 @@ except Exception as e:
 DATA_IMAGES_DOMAIN_URL = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/data_images"
 
 
+def clean_data(data: Any) -> Any:
+    """
+    Recorre recursivamente los datos y convierte placeholders de Swagger
+    como "string" o cadenas vacías en None.
+    """
+    if isinstance(data, dict):
+        return {k: clean_data(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [clean_data(i) for i in data]
+    
+    # Lista de valores que consideramos como "sin valor real"
+    if data == "string" or data == "":
+        return None
+    return data
+
 def _get_professional_id(db, user_id: str) -> Optional[str]:
     row = db.execute(
         text("SELECT id FROM professionals WHERE user_id = :uid LIMIT 1"),
@@ -107,6 +122,8 @@ async def create_medical_record(
     fecha_paciente: Optional[date] = Form(None),
     firma_medico_laboral: UploadFile = File(None),
     fecha_medico_laboral: Optional[date] = Form(None),
+    firma_responsable: UploadFile = File(None),
+    fecha_responsable: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     """
@@ -215,6 +232,26 @@ async def create_medical_record(
             except Exception as e:
                 print(f"Error saving patient signature: {e}")
                 raise HTTPException(status_code=500, detail=f"Error saving patient signature file: {str(e)}")
+        
+        # 3d. Handle Responsable Signature File if present
+        responsable_signature_url = None
+        if firma_responsable:
+            try:
+                # Generate unique filename
+                filename_str = firma_responsable.filename or "signature_responsable.png"
+                file_ext = os.path.splitext(filename_str)[1]
+                filename = f"sig_resp_{uuid.uuid4()}{file_ext}"
+                file_path = SIGNATURES_DIR / filename
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(firma_responsable.file, buffer)
+                
+                # Construct URL
+                base_url = DOMAIN_URL.rstrip("/")
+                responsable_signature_url = f"{base_url}/{filename}"
+            except Exception as e:
+                print(f"Error saving responsable signature: {e}")
+                raise HTTPException(status_code=500, detail=f"Error saving responsable signature file: {str(e)}")
 
         # 4. Insert Main Record
         record_id = str(uuid.uuid4())
@@ -231,6 +268,8 @@ async def create_medical_record(
         # 5. Insert Sub-tables
         # We iterate over the fields of the request_model
         model_dump = request_model.model_dump(exclude_unset=True)
+        # Limpiar placeholders de Swagger ("string" -> None)
+        model_dump = clean_data(model_dump)
         
         # Helper to insert generic sub-table
         def insert_sub_table(table_name: str, data_dict: dict, inject_medical_record_id: bool = True):
@@ -399,6 +438,31 @@ async def create_medical_record(
             """
             db.execute(text(query), pat_sig_data)
 
+        # 9. Insert Responsable Signature
+        resp_sig_data = model_dump.get("medical_record_medical_responsable_signatures", {}) or {}
+        if responsable_signature_url:
+            resp_sig_data["url"] = responsable_signature_url
+        
+        if resp_sig_data or responsable_signature_url:
+            resp_sig_data["id"] = str(uuid.uuid4())
+            resp_sig_data["medical_record_id"] = record_id
+            resp_sig_data["created_at"] = fecha_responsable # Use the responsable date
+            
+            # Get professional ID
+            prof_id = None
+            if current_user.role == "professional":
+                prof_id = _get_professional_id(db, current_user.id)
+            if prof_id:
+                resp_sig_data["professional_id"] = prof_id
+            
+            columns = list(resp_sig_data.keys())
+            values_placeholders = [f":{col}" for col in columns]
+            query = f"""
+                INSERT INTO medical_record_medical_responsable_signatures ({', '.join(columns)})
+                VALUES ({', '.join(values_placeholders)})
+            """
+            db.execute(text(query), resp_sig_data)
+
         db.commit()
         return {"id": record_id, "detail": "Medical record created successfully"}
 
@@ -438,7 +502,7 @@ async def get_medical_records_by_patient(
             "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
-            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures", "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_patient_signatures"
+            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures", "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_oftalmologico_medical_exam", "medical_record_patient_signatures", "medical_record_medical_responsable_signatures"
         ]
         
         for rec in records:
@@ -533,6 +597,11 @@ async def delete_medical_record(
             {"rid": record_id}
         ).mappings().all()
 
+        responsable_signatures = db.execute(
+            text("SELECT url FROM medical_record_medical_responsable_signatures WHERE medical_record_id = :rid"), 
+            {"rid": record_id}
+        ).mappings().all()
+
         # B. Buscar Data Images (Es mas complejo porque requiere join o subquery)
         # Primero buscamos los IDs de medical_record_data asociados a este record
         data_rows = db.execute(
@@ -560,6 +629,9 @@ async def delete_medical_record(
         
         for p_sig in patient_signatures:
             delete_physical_file(p_sig["url"], SIGNATURES_DIR)
+        
+        for r_sig in responsable_signatures:
+            delete_physical_file(r_sig["url"], SIGNATURES_DIR)
             
         for img_url in data_images_urls:
             delete_physical_file(img_url, DATA_IMAGES_DIR)
@@ -587,7 +659,7 @@ async def delete_medical_record(
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
             "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures",
-            "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_patient_signatures"
+            "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_oftalmologico_medical_exam", "medical_record_patient_signatures", "medical_record_medical_responsable_signatures"
         ]
         
         for table in table_names:
@@ -637,6 +709,8 @@ async def update_medical_record(
         # Lógica de Sub-tablas (Tu loop original)
         # -------------------------------------------------
         model_dump = request_model.model_dump(exclude_unset=True)
+        # Limpiar placeholders de Swagger ("string" -> None)
+        model_dump = clean_data(model_dump)
         
         # Necesitamos capturar el ID de medical_record_data si existe o se crea
         # para poder asociar la imagen data_img

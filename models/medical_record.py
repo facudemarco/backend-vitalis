@@ -359,6 +359,13 @@ class MedicalRecordPatientSignatures(BaseModel):
     url: Optional[str] = None
     patient_id: Optional[str] = None
     created_at: Optional[datetime] = None
+    
+class MedicalRecordMedicalResponsableSignatures(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    url: Optional[str] = None
+    professional_id: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 class MedicalRecordSkinExam(BaseModel):
     id: Optional[str] = None
@@ -411,7 +418,7 @@ class MedicalRecordSurgerys(BaseModel):
 class MedicalRecordCuestionarioRiesgos(BaseModel):
     id: Optional[str] = None
     medical_record_id: Optional[str] = None
-    company: Optional[str] = None
+    company_id: Optional[str] = None
     complete_name: Optional[str] = None
     dni: Optional[int] = None
     age: Optional[int] = None
@@ -451,6 +458,22 @@ class MedicalRecordNeuroMedicalExam(BaseModel):
     exam_miembro_inf_anormal: Optional[bool] = None
     exam_miembro_inf_description: Optional[str] = None
 
+class MedicalRecordOftalmologicoMedicalExam(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    visual_cercana_oi: Optional[str] = None
+    visual_cercana_od: Optional[str] = None
+    visual_cercana_binocular: Optional[str] = None
+    visual_lejana_oi: Optional[str] = None
+    visual_lejana_od: Optional[str] = None
+    visual_lejana_binocular: Optional[str] = None
+    discriminacion_colores_oi: Optional[str] = None
+    discriminacion_colores_od: Optional[str] = None
+    discriminacion_colores_binocular: Optional[str] = None
+    campimetria_oi: Optional[str] = None
+    campimetria_od: Optional[str] = None
+    campimetria_binocular: Optional[str] = None
+    dictamen: Optional[str] = None
 
 # -------------------------------------------------------------------
 # Request / Response Unificados
@@ -491,6 +514,7 @@ class MedicalRecordFullRequest(BaseModel):
     medical_record_cuestionario_riesgos: Optional[MedicalRecordCuestionarioRiesgos] = Field(None, description="** Medical Record Cuestionario Riesgos")
     medical_record_ddjj: Optional[MedicalRecordDdjj] = Field(None, description="** Medical Record DDJJ")
     medical_record_neuro_medical_exam: Optional[MedicalRecordNeuroMedicalExam] = Field(None, description="**Medical Record Neuro Medical Exam**")
+    medical_record_oftalmologico_medical_exam: Optional[MedicalRecordOftalmologicoMedicalExam] = Field(None, description="**Medical Record Oftalmologico Medical Exam**")
 
     @model_validator(mode='before')
     @classmethod
@@ -534,9 +558,11 @@ class MedicalRecordFullResponse(BaseModel):
     medical_record_signatures: Optional[MedicalRecordSignatures] = Field(None, description="**Medical Record Signatures**")
     medical_record_laboral_signatures: Optional[MedicalRecordLaboralSignatures] = Field(None, description="**Medical Record Laboral Signatures**")
     medical_record_patient_signatures: Optional[MedicalRecordPatientSignatures] = Field(None, description="**Medical Record Patient Signatures**")
+    medical_record_medical_responsable_signatures: Optional[MedicalRecordMedicalResponsableSignatures] = Field(None, description="**Medical Record Medical Responsable Signatures**")
     medical_record_skin_exam: Optional[MedicalRecordSkinExam] = Field(None, description="**Medical Record Skin Exam**")
     medical_record_studies: Optional[MedicalRecordStudies] = Field(None, description="**Medical Record Studies**")
     medical_record_surgerys: Optional[MedicalRecordSurgerys] = Field(None, description="**Medical Record Surgerys**")
     medical_record_ddjj: Optional[MedicalRecordDdjj] = Field(None, description="**Medical Record DDJJ**")
     medical_record_cuestionario_riesgos: Optional[MedicalRecordCuestionarioRiesgos] = Field(None, description="**Medical Record Cuestionario Riesgos**")
     medical_record_neuro_medical_exam: Optional[MedicalRecordNeuroMedicalExam] = Field(None, description="**Medical Record Neuro Medical Exam**")
+    medical_record_oftalmologico_medical_exam: Optional[MedicalRecordOftalmologicoMedicalExam] = Field(None, description="**Medical Record Oftalmologico Medical Exam**")
