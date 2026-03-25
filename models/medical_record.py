@@ -418,11 +418,14 @@ class MedicalRecordSurgerys(BaseModel):
 class MedicalRecordCuestionarioRiesgos(BaseModel):
     id: Optional[str] = None
     medical_record_id: Optional[str] = None
-    company_id: Optional[str] = None
+    company_name: Optional[str] = None
     complete_name: Optional[str] = None
     dni: Optional[int] = None
     age: Optional[int] = None
     weight: Optional[float] = None
+    es_apto: Optional[bool] = None
+    no_es_apto: Optional[bool] = None
+    observations: Optional[str] = None
 
 class MedicalRecordDdjj(BaseModel):
     id: Optional[str] = None
