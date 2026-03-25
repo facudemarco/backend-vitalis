@@ -423,12 +423,7 @@ async def create_medical_record(
             pat_sig_data["medical_record_id"] = record_id
             pat_sig_data["created_at"] = fecha_paciente # Use the patient date
             
-            # Get professional ID
-            prof_id = None
-            if current_user.role == "professional":
-                prof_id = _get_professional_id(db, current_user.id)
-            if prof_id:
-                pat_sig_data["professional_id"] = prof_id
+            pat_sig_data["patient_id"] = patient_id
             
             columns = list(pat_sig_data.keys())
             values_placeholders = [f":{col}" for col in columns]
@@ -689,6 +684,8 @@ async def update_medical_record(
     fecha_medico_laboral: Optional[date] = Form(None),
     firma_paciente: UploadFile = File(None),
     fecha_paciente: Optional[date] = Form(None),
+    firma_responsable: UploadFile = File(None),
+    fecha_responsable: Optional[date] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     request_model = data
@@ -909,7 +906,7 @@ async def update_medical_record(
                 # D. Insertar
                 pat_data = {
                     "id": str(uuid.uuid4()), "medical_record_id": record_id, "url": new_url,
-                    "professional_id": prof_id,
+                    "patient_id": patient_id,
                     "created_at": fecha_paciente if fecha_paciente else datetime.utcnow()
                 }
                 # ... Query de insert ...
@@ -920,11 +917,48 @@ async def update_medical_record(
             except Exception as e:
                  raise HTTPException(status_code=500, detail=f"Error paciente signature update: {e}")
 
+        # -------------------------------------------------
+        # 5. Update FIRMA RESPONSABLE (Refactorizado)
+        # -------------------------------------------------
+        if firma_responsable:
+            try:
+                # A. Buscar vieja
+                existing_resp = db.execute(text("SELECT id, url FROM medical_record_medical_responsable_signatures WHERE medical_record_id = :rid"), {"rid": record_id}).mappings().first()
+                
+                # B. Borrar vieja
+                if existing_resp:
+                    delete_physical_file(existing_resp["url"], SIGNATURES_DIR) # Usando Helper
+                    db.execute(text("DELETE FROM medical_record_medical_responsable_signatures WHERE id = :id"), {"id": existing_resp["id"]})
+
+                # C. Guardar nueva
+                filename = f"sig_resp_{uuid.uuid4()}{os.path.splitext(firma_responsable.filename or '')[1]}"
+                file_path = SIGNATURES_DIR / filename
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(firma_responsable.file, buffer)
+
+                new_url = f"{DOMAIN_URL.rstrip('/')}/{filename}"
+                prof_id = _get_professional_id(db, current_user.id)
+
+                # D. Insertar
+                resp_data = {
+                    "id": str(uuid.uuid4()), "medical_record_id": record_id, "url": new_url,
+                    "professional_id": prof_id,
+                    "created_at": fecha_responsable if fecha_responsable else datetime.utcnow()
+                }
+                # ... Query de insert ...
+                keys = list(resp_data.keys())
+                vals = [f":{k}" for k in keys]
+                db.execute(text(f"INSERT INTO medical_record_medical_responsable_signatures ({', '.join(keys)}) VALUES ({', '.join(vals)})"), resp_data)
+
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error responsable signature update: {e}")
+
         db.commit()
         return {"detail": "Updated successfully with file management"}
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         db.close()
