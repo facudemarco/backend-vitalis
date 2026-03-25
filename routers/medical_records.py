@@ -22,6 +22,7 @@ import json
 import uuid
 import os
 import shutil
+import mimetypes
 from pathlib import Path
 import json
 from datetime import date
@@ -91,6 +92,22 @@ def _get_professional_id(db, user_id: str) -> Optional[str]:
         return None
     return row["id"]
 
+def get_file_extension(file: UploadFile) -> str:
+    """
+    Intenta obtener la extensión del archivo a partir de su nombre o su content_type.
+    """
+    # 1. Intentar por el nombre del archivo
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1]
+    
+    # 2. Si no tiene extensión o es genérica, intentar por content_type
+    if (not ext or ext.lower() not in ['.jpg', '.jpeg', '.png', '.webp', '.pdf']) and file.content_type:
+        ext = mimetypes.guess_extension(file.content_type)
+        if ext == ".jpe":
+            ext = ".jpg"
+    
+    return ext or ".png"
+
 def delete_physical_file(file_url: str, base_directory: Path):
     """
     Extrae el nombre del archivo de la URL y lo elimina del sistema de archivos.
@@ -154,8 +171,7 @@ async def create_medical_record(
         if firma_medico_evaluador:
             try:
                 # Generate unique filename
-                filename_str = firma_medico_evaluador.filename or "signature.png"
-                file_ext = os.path.splitext(filename_str)[1]
+                file_ext = get_file_extension(firma_medico_evaluador)
                 filename = f"sig_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 
@@ -178,8 +194,7 @@ async def create_medical_record(
         if firma_medico_laboral:
             try:
                 # Generate unique filename
-                filename_str = firma_medico_laboral.filename or "signature_laboral.png"
-                file_ext = os.path.splitext(filename_str)[1]
+                file_ext = get_file_extension(firma_medico_laboral)
                 filename = f"sig_lab_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 
@@ -198,8 +213,7 @@ async def create_medical_record(
         if data_img:
             try:
                 # Generate unique filename
-                filename_str = data_img.filename or "data_img.png"
-                file_ext = os.path.splitext(filename_str)[1]
+                file_ext = get_file_extension(data_img)
                 filename = f"data_{uuid.uuid4()}{file_ext}"
                 file_path = DATA_IMAGES_DIR / filename 
                 
@@ -218,8 +232,7 @@ async def create_medical_record(
         if firma_paciente:
             try:
                 # Generate unique filename
-                filename_str = firma_paciente.filename or "signature_paciente.png"
-                file_ext = os.path.splitext(filename_str)[1]
+                file_ext = get_file_extension(firma_paciente)
                 filename = f"sig_pat_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 
@@ -238,8 +251,7 @@ async def create_medical_record(
         if firma_responsable:
             try:
                 # Generate unique filename
-                filename_str = firma_responsable.filename or "signature_responsable.png"
-                file_ext = os.path.splitext(filename_str)[1]
+                file_ext = get_file_extension(firma_responsable)
                 filename = f"sig_resp_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 
@@ -789,8 +801,7 @@ async def update_medical_record(
                     db.execute(text("DELETE FROM medical_record_data_img WHERE id = :id"), {"id": existing_img["id"]})
 
                 # C. Guardar imagen nueva
-                filename_str = data_img.filename or "data_updated.png"
-                file_ext = os.path.splitext(filename_str)[1]
+                file_ext = get_file_extension(data_img)
                 filename = f"data_{uuid.uuid4()}{file_ext}"
                 file_path = DATA_IMAGES_DIR / filename
                 
@@ -823,7 +834,8 @@ async def update_medical_record(
                     db.execute(text("DELETE FROM medical_record_signatures WHERE id = :id"), {"id": existing_sig["id"]})
 
                 # C. Guardar nueva
-                filename = f"sig_{uuid.uuid4()}{os.path.splitext(firma_medico_evaluador.filename or '')[1]}"
+                file_ext = get_file_extension(firma_medico_evaluador)
+                filename = f"sig_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(firma_medico_evaluador.file, buffer)
@@ -859,7 +871,8 @@ async def update_medical_record(
                     db.execute(text("DELETE FROM medical_record_laboral_signatures WHERE id = :id"), {"id": existing_lab["id"]})
 
                 # C. Guardar nueva
-                filename = f"sig_lab_{uuid.uuid4()}{os.path.splitext(firma_medico_laboral.filename or '')[1]}"
+                file_ext = get_file_extension(firma_medico_laboral)
+                filename = f"sig_lab_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(firma_medico_laboral.file, buffer)
@@ -895,7 +908,8 @@ async def update_medical_record(
                     db.execute(text("DELETE FROM medical_record_patient_signatures WHERE id = :id"), {"id": existing_pat["id"]})
 
                 # C. Guardar nueva
-                filename = f"sig_pat_{uuid.uuid4()}{os.path.splitext(firma_paciente.filename or '')[1]}"
+                file_ext = get_file_extension(firma_paciente)
+                filename = f"sig_pat_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(firma_paciente.file, buffer)
@@ -931,7 +945,8 @@ async def update_medical_record(
                     db.execute(text("DELETE FROM medical_record_medical_responsable_signatures WHERE id = :id"), {"id": existing_resp["id"]})
 
                 # C. Guardar nueva
-                filename = f"sig_resp_{uuid.uuid4()}{os.path.splitext(firma_responsable.filename or '')[1]}"
+                file_ext = get_file_extension(firma_responsable)
+                filename = f"sig_resp_{uuid.uuid4()}{file_ext}"
                 file_path = SIGNATURES_DIR / filename
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(firma_responsable.file, buffer)

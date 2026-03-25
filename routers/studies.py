@@ -11,6 +11,7 @@ import uuid
 import os
 from typing import Optional
 import shutil
+import mimetypes
 from typing import List
 
 router = APIRouter(prefix="/studies")
@@ -36,6 +37,24 @@ except Exception as e:
     print(f"Warning: Could not create studies admin directory: {e}")
 
 DOMAIN_URL_ADMIN = "https://saludvitalis.org/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api/studies_admin/files"
+
+def get_file_extension(file: UploadFile) -> str:
+    """
+    Intenta obtener la extensión del archivo a partir de su nombre o su content_type.
+    """
+    # 1. Intentar por el nombre del archivo
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1]
+    
+    # 2. Si no tiene extensión o es genérica, intentar por content_type
+    if (not ext or ext.lower() not in ['.jpg', '.jpeg', '.png', '.webp', '.pdf']) and file.content_type:
+        ext = mimetypes.guess_extension(file.content_type)
+        if ext == ".jpe":
+            ext = ".jpg"
+    
+    # Default for studies might be .pdf or .png depending on context, 
+    # but let's keep it consistent or use a sensible default.
+    return ext or ""
 
 def _format_study(row) -> dict:
     return {
@@ -101,7 +120,7 @@ async def create_study(
                 os.makedirs(STUDIES_DIR, exist_ok=True)
             
             # Normalize filename and ensure uniqueness
-            ext = os.path.splitext(file.filename or "file.pdf")[1].lower()
+            ext = get_file_extension(file)
             fname = f"{uuid.uuid4()}{ext}"
             path = os.path.join(STUDIES_DIR, fname)
             
@@ -442,7 +461,7 @@ async def upload_study_file(
         os.makedirs(STUDIES_DIR, exist_ok=True)
         
         file_id = str(uuid.uuid4())
-        file_extension = os.path.splitext(file.filename or "")[1]
+        file_extension = get_file_extension(file)
         stored_filename = f"{file_id}{file_extension}"
         file_path = os.path.join(STUDIES_DIR, stored_filename)
         
@@ -550,7 +569,7 @@ async def create_study_category(
         
         if image:
             file_id = str(uuid.uuid4())
-            file_extension = os.path.splitext(image.filename or "")[1]
+            file_extension = get_file_extension(image)
             stored_filename = f"{file_id}{file_extension}"
             file_path = os.path.join(STUDIES_ADMIN_DIR, stored_filename)
             
@@ -629,7 +648,7 @@ async def update_study_category(
 
             # 2. Save new image
             file_id = str(uuid.uuid4())
-            file_extension = os.path.splitext(image.filename or "")[1]
+            file_extension = get_file_extension(image)
             stored_filename = f"{file_id}{file_extension}"
             file_path = os.path.join(STUDIES_ADMIN_DIR, stored_filename)
             
