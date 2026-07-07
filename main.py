@@ -7,6 +7,7 @@ from routers.companies import router as routerCompanies
 from routers.patients import router as routerPatients
 from routers.medical_records import router as routerMedicalRecords
 from routers.studies import router as routerStudies
+from routers.support import router as routerSupport
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
@@ -46,3 +47,4 @@ app.include_router(routerCompanies)
 app.include_router(routerPatients)
 app.include_router(routerMedicalRecords)
 app.include_router(routerStudies)
+app.include_router(routerSupport)
