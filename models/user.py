@@ -29,7 +29,7 @@ class professionals(Base):
     id = Column(CHAR(36), primary_key=True, index=True)
     user_id = Column(CHAR(36))
     license_number = Column(String(255))
-    profesion = Column(String(255))
+    rol = Column(String(255))
     speciality = Column(String(255))
     phone = Column(Integer)
     

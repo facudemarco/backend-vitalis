@@ -53,6 +53,32 @@ async def get_users(current_user: User = Depends(require_roles("admin"))):
     finally:
         db.close()
 
+@router.get("/getAdmins", tags=["Admin - Users"])
+async def get_admins(current_user: User = Depends(require_roles("admin"))):
+    """Obtener admins (solo admin)"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        rows = db.query(User).filter(User.role == "admin").all()
+        users = [_format_user({
+            "id": u.id,
+            "email": u.email,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "dni": u.dni,
+            "date_of_birth": u.date_of_birth,
+            "phone": u.phone,
+            "role": u.role,
+            "is_active": u.is_active,
+            "created_at": getattr(u, 'created_at', None),
+        }) for u in rows]
+        return {"users": users, "total": len(users)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error fetching users")
+    finally:
+        db.close()
 
 @router.get("/getProfessionals", tags=["Admin - Users"])
 async def get_professionals(current_user: User = Depends(require_roles("admin"))):
@@ -75,7 +101,7 @@ async def get_professionals(current_user: User = Depends(require_roles("admin"))
                 "dni": u.dni,
                 "date_of_birth": u.date_of_birth,
                 "license_number": p.license_number,
-                "profesion": p.profesion,
+                "rol": p.rol,
                 "email": u.email,
                 "speciality": p.speciality,
                 "phone": p.phone,
@@ -89,34 +115,30 @@ async def get_professionals(current_user: User = Depends(require_roles("admin"))
     finally:
         db.close()
 
-@router.get("/{user_id}", tags=["Admin - Users"])
-async def get_user_by_id(user_id: str, current_user: User = Depends(require_roles("admin"))):
-    """Obtener usuario por ID (solo admin)"""
+@router.get("/getSecretaries", tags=["Admin - Users"])
+async def get_secretaries(current_user: User = Depends(require_roles("admin"))):
+    """Obtener secretarias (solo admin)"""
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        return _format_user({
-            "id": user.id,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "dni": user.dni,
-            "date_of_birth": user.date_of_birth,
-            "phone": user.phone,
-            "role": user.role,
-            "is_active": user.is_active,
-            "created_at": getattr(user, 'created_at', None),
-        })
-    except HTTPException:
-        raise
+        rows = db.query(User).filter(User.role == "secretary").all()
+        users = [_format_user({
+            "id": u.id,
+            "email": u.email,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "dni": u.dni,
+            "date_of_birth": u.date_of_birth,
+            "phone": u.phone,
+            "role": u.role,
+            "is_active": u.is_active,
+            "created_at": getattr(u, 'created_at', None),
+        }) for u in rows]
+        return {"users": users, "total": len(users)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error fetching user")
+        raise HTTPException(status_code=500, detail="Error fetching users")
     finally:
         db.close()
 
@@ -183,7 +205,104 @@ async def get_users_by_role(role: str, current_user: User = Depends(require_role
     finally:
         db.close()
 
+@router.get("/getProfessionalsForSecretary", tags=["Get - Secretary"])
+async def get_professionals(current_user: User = Depends(require_roles("secretary"))):
+    """Obtener todos los profesionales"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        # Join User and professionals tables
+        rows = db.query(User, professionals).join(professionals, User.id == professionals.user_id).all()
+        
+        result_list = []
+        for u, p in rows:
+            result_list.append({
+                "professional_id": p.id,
+                "user_id": u.id,
+                "name": u.first_name,
+                "lastname": u.last_name,
+                "dni": u.dni,
+                "date_of_birth": u.date_of_birth,
+                "license_number": p.license_number,
+                "rol": p.rol,
+                "email": u.email,
+                "speciality": p.speciality,
+                "phone": p.phone,
+                "created_at": getattr(u, 'created_at', None),
+            })
+            
+        return {"users": result_list, "total": len(result_list)}
+    except Exception as e:
+        print(f"Error fetching professionals: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching professionals")
+    finally:
+        db.close()
 
+@router.get("/getUsersForSecretary", tags=["Get - Secretary"])
+async def get_users(current_user: User = Depends(require_roles("secretary"))):
+    """Obtener todos los usuarios"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        # Join User and users tables
+        rows = db.query(User).all()
+        
+        result_list = []
+        for u in rows:
+            result_list.append({
+                "user_id": u.id,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "email": u.email,
+                "dni": u.dni,
+                "date_of_birth": u.date_of_birth,
+                "phone": u.phone,
+                "role": u.role,
+                "is_active": u.is_active,
+                "created_at": getattr(u, 'created_at', None),
+            })
+            
+        return {"users": result_list, "total": len(result_list)}
+    except Exception as e:
+        print(f"Error fetching users: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching users")
+    finally:
+        db.close()
+
+@router.get("/{user_id}", tags=["Admin - Users"])
+async def get_user_by_id(user_id: str, current_user: User = Depends(require_roles("admin"))):
+    """Obtener usuario por ID (solo admin)"""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return _format_user({
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "dni": user.dni,
+            "date_of_birth": user.date_of_birth,
+            "phone": user.phone,
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": getattr(user, 'created_at', None),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error fetching user")
+    finally:
+        db.close()
     
 # ==================== UPDATE EXTENDED PROFILES ====================
 
@@ -225,6 +344,7 @@ async def update_admin_profile(
     finally:
         db.close()
 
+
 @router.put("/patient/{user_id}", tags=["Admin - Users"])
 async def update_patient_profile(
     user_id: str,
@@ -255,12 +375,12 @@ async def update_patient_profile(
 async def update_professional_profile(
     user_id: str,
     license_number: str = Form(default=""),
-    profesion: str = Form(default=""),
+    rol: str = Form(default=""),
     speciality: str = Form(default=""),
     phone: str = Form(default=""),
     current_user: User = Depends(require_roles("admin"))
 ):
-    """Actualiza la informacion en la tabla professionals (incluye profesion)"""
+    """Actualiza la informacion en la tabla professionals (incluye rol)"""
     db = getConnectionForLogin()
     if not db:
         raise HTTPException(status_code=500, detail="Database connection error")
@@ -268,12 +388,12 @@ async def update_professional_profile(
     try:
         db.execute(text("""
             UPDATE professionals
-            SET license_number = :license_number, profesion = :profesion,
+            SET license_number = :license_number, rol = :rol,
                 speciality = :speciality, phone = :phone
             WHERE user_id = :uid
         """), {
             "license_number": license_number,
-            "profesion": profesion,
+            "rol": rol,
             "speciality": speciality,
             "phone": phone,
             "uid": user_id
@@ -283,6 +403,42 @@ async def update_professional_profile(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error updating professional: " + str(e))
+    finally:
+        db.close()
+
+@router.put("/secretary/{user_id}", tags=["Admin - Users"])
+async def update_secretary_profile(
+    user_id: str,
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    phone: str = Form(default=""),
+    dni: str = Form(default=""),
+    date_of_birth: str = Form(default=""),
+    current_user: User = Depends(require_roles("admin"))
+):
+    """Actualiza la informacion del secretary en la tabla base users"""
+    db = getConnectionForLogin()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection error")
+        
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+             
+        user.first_name = first_name
+        user.last_name = last_name
+        user.phone = phone
+        user.dni = dni
+        user.date_of_birth = date_of_birth
+        
+        db.commit()
+        return {"detail": "Secretary updated successfully", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating secretary: " + str(e))
     finally:
         db.close()
 

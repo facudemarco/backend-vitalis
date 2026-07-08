@@ -176,6 +176,7 @@ def resolve_profile_ids(user_id: str, role: str) -> dict:
             "company_id": None,
             "patient_id": None,
             "professional_id": None,
+            "secretary_id": None,
         }
 
         if role == "professional":
@@ -206,7 +207,7 @@ def resolve_profile_ids(user_id: str, role: str) -> dict:
                 raise HTTPException(status_code=400, detail="Company profile missing")
             profile["company_id"] = row["id"]
 
-        elif role == "admin":
+        elif role == "admin" or role == "secretary":
             pass
         else:
             raise HTTPException(status_code=400, detail="Invalid role")

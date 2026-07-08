@@ -93,6 +93,25 @@ async def create_study(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
+        # Check professional's role
+        if current_user.role == "professional":
+            prof_row = db.execute(
+                text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
+                {"uid": current_user.id}
+            ).mappings().first()
+            if not prof_row:
+                raise HTTPException(status_code=403, detail="Professional record not found")
+            
+            rol = prof_row["rol"]
+            if rol == "tecnico":
+                status = "pending"
+            elif rol == "licenciado":
+                status = "Disponible"
+            elif rol == "especialista":
+                pass
+            else:
+                raise HTTPException(status_code=403, detail="Invalid professional role")
+
         study_id = str(uuid.uuid4())
         created_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -357,6 +376,19 @@ async def update_study(
         
         if not row:
             raise HTTPException(status_code=404, detail="Study not found")
+        
+        if status is not None:
+            if current_user.role == "professional":
+                prof_row = db.execute(
+                    text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
+                    {"uid": current_user.id}
+                ).mappings().first()
+                if not prof_row:
+                    raise HTTPException(status_code=403, detail="Professional record not found")
+                
+                rol = prof_row["rol"]
+                if rol != "especialista":
+                    raise HTTPException(status_code=403, detail="Only specialists can change study status")
         
         updates = []
         params = {"sid": study_id}

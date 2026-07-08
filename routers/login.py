@@ -223,7 +223,7 @@ async def register_professional(
     email: str = Form(...),
     password: str = Form(...),
     license_number: str = Form(...),
-    profesion: str = Form(...),
+    rol: str = Form(...),
     speciality: str = Form(...),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
@@ -262,14 +262,14 @@ async def register_professional(
         # Crear registro en tabla professionals
         db.execute(
             text("""
-                INSERT INTO professionals (id, user_id, license_number, profesion, speciality, phone)
-                VALUES (:id, :user_id, :license, :profesion, :speciality, :phone)
+                INSERT INTO professionals (id, user_id, license_number, rol, speciality, phone)
+                VALUES (:id, :user_id, :license, :rol, :speciality, :phone)
             """),
             {
                 "id": professional_id,
                 "user_id": user_id,
                 "license": license_number,
-                "profesion": profesion,
+                "rol": rol,
                 "speciality": speciality,
                 "phone": phone,
             }
@@ -326,6 +326,51 @@ async def register_admin(
 
     return {"detail": "Admin registered successfully", "user_id": user_id}
 
+@router.post("/auth/register/secretary", tags=["Register"])
+async def register_secretary(
+    email: str = Form(...),
+    password: str = Form(...),
+    first_name: str = Form(default=""),
+    last_name: str = Form(default=""),
+    dni: str = Form(default=""),
+    phone: str = Form(default=""),
+    date_of_birth: str = Form(default=""),
+):
+    existing_user = get_user_by_email(email)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    hashed_password = hash_password(password)
+    user_id = str(uuid.uuid4())
+
+    new_user = User(
+        id=user_id,
+        email=email,
+        hashed_password=hashed_password,
+        first_name=first_name,
+        last_name=last_name,
+        dni=dni,
+        date_of_birth=date_of_birth,
+        phone=phone,
+        role="secretary",
+        is_active=True,
+    )
+
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error creating secretary, " + str(e))
+    finally:
+        db.close()
+
+    return {"detail": "Secretary registered successfully", "user_id": user_id}
+
 @router.post("/change-password", tags=["Register"])
 async def change_password(current_user: UserSchema = Depends(require_active_user), old_password: str = Form(...), new_password: str = Form(...)):
     user = authenticate_user(current_user.email, old_password)
@@ -350,4 +395,3 @@ async def change_password(current_user: UserSchema = Depends(require_active_user
         db.close()
 
     return {"detail": "Password changed successfully"}
-
