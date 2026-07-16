@@ -32,8 +32,8 @@ async def get_companies(current_user: User = Depends(require_active_user)):
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        if current_user.role == "admin" or current_user.role == "professional":
-            # Admin ve todas
+        if current_user.role in ("admin", "professional", "secretary"):
+            # Admin/secretary/professional ve todas
             rows = db.execute(text("""
                 SELECT id, name, responsable_name, cuit, email, phone, address, owner_user_id
                 FROM companies
@@ -77,8 +77,8 @@ async def get_company_by_id(company_id: str, current_user: User = Depends(requir
         # Validar acceso
         if current_user.role == "company" and row["owner_user_id"] != current_user.id:
             raise HTTPException(status_code=403, detail="You can only view your own company")
-        elif current_user.role not in ("admin", "company"):
-            raise HTTPException(status_code=403, detail="Only admin or company owners can view companies")
+        elif current_user.role not in ("admin", "company", "secretary"):
+            raise HTTPException(status_code=403, detail="Only admin, secretary or company owners can view companies")
         
         return _format_company(row)
     except HTTPException:
@@ -111,8 +111,8 @@ async def create_employee(
     """
     
     # Validar que sea admin o owner
-    if current_user.role not in ("admin", "company"):
-        raise HTTPException(status_code=403, detail="Only admin or company owners can create employees")
+    if current_user.role not in ("admin", "company", "secretary"):
+        raise HTTPException(status_code=403, detail="Only admin, secretary or company owners can create employees")
     
     db = getConnectionForLogin()
     if db is None:
@@ -204,6 +204,9 @@ async def delete_employee(
         
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
+        
+        if current_user.role not in ("admin", "company", "secretary"):
+            raise HTTPException(status_code=403, detail="Only admin, secretary or company owners can delete employees")
         
         if current_user.role == "company" and company["owner_user_id"] != current_user.id:
             raise HTTPException(status_code=403, detail="You can only delete employees for your own company")

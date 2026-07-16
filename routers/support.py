@@ -85,9 +85,9 @@ async def create_ticket(
 
 @router.get("/tickets", response_model=dict)
 async def get_all_tickets(
-    current_user: UserSchema = Depends(require_roles("admin"))
+    current_user: UserSchema = Depends(require_roles("admin", "secretary"))
 ):
-    """List all tickets for admin"""
+    """List all tickets for admin/secretary"""
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
@@ -150,8 +150,8 @@ async def get_ticket_by_id(
         if not row:
             raise HTTPException(status_code=404, detail="Ticket not found")
             
-        # Security: admin can see all, company/patient only their own
-        if current_user.role != "admin" and row["user_id"] != current_user.id:
+        # Security: admin/secretary can see all, company/patient only their own
+        if current_user.role not in ("admin", "secretary") and row["user_id"] != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to view this ticket."
@@ -169,9 +169,9 @@ async def get_ticket_by_id(
 async def respond_ticket(
     ticket_id: str,
     payload: TicketResponse,
-    current_user: UserSchema = Depends(require_roles("admin"))
+    current_user: UserSchema = Depends(require_roles("admin", "secretary"))
 ):
-    """Respond to a support ticket (admin only)"""
+    """Respond to a support ticket (admin/secretary)"""
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")

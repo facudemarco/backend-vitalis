@@ -86,7 +86,7 @@ async def create_study(
     study_type: str = Form(...),
     status: str = Form(...),
     study_files: List[UploadFile] = File(...),
-    current_user: User = Depends(require_roles("admin", "professional"))
+    current_user: User = Depends(require_roles("admin", "professional", "secretary"))
 ):
     db = getConnectionForLogin()
     if db is None:
@@ -362,7 +362,7 @@ async def update_study(
     study_id: str,
     study_type: str = Form(default=None),
     status: str = Form(default=None),
-    current_user: User = Depends(require_roles("professional", "admin"))
+    current_user: User = Depends(require_roles("professional", "admin", "secretary"))
 ):
     db = getConnectionForLogin()
     if db is None:
@@ -422,7 +422,7 @@ async def update_study(
 @router.delete("/{study_id}", tags=["Studies"])
 async def delete_study(
     study_id: str,
-    current_user: User = Depends(require_roles("admin"))
+    current_user: User = Depends(require_roles("admin", "secretary"))
 ):
     db = getConnectionForLogin()
     if db is None:
@@ -487,8 +487,8 @@ async def upload_study_file(
         if not study:
             raise HTTPException(status_code=404, detail="Study not found")
         
-        if current_user.role not in ("admin", "professional"):
-            raise HTTPException(status_code=403, detail="Only admin or professionals can upload files")
+        if current_user.role not in ("admin", "professional", "secretary"):
+            raise HTTPException(status_code=403, detail="Only admin, secretary or professionals can upload files")
         
         os.makedirs(STUDIES_DIR, exist_ok=True)
         
@@ -545,7 +545,7 @@ async def upload_study_file(
 async def delete_study_file(
     study_id: str,
     file_id: str,
-    current_user: User = Depends(require_roles("admin"))
+    current_user: User = Depends(require_roles("admin", "secretary"))
 ):
     db = getConnectionForLogin()
     if db is None:
@@ -718,7 +718,7 @@ async def update_study_category(
 @router.delete("/admin/delete_study_category/{study_id}", tags=["Studies Admin"])
 async def delete_study_category(
     study_id: str,
-    current_user: User = Depends(require_roles("admin"))
+    current_user: User = Depends(require_roles("admin", "secretary"))
 ):
     db = getConnectionForLogin()
     if db is None:

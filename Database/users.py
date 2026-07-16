@@ -181,12 +181,16 @@ def resolve_profile_ids(user_id: str, role: str) -> dict:
 
         if role == "professional":
             row = db.execute(
-                text("SELECT id FROM professionals WHERE user_id = :uid LIMIT 1"),
+                text("SELECT id, license_number, speciality, rol, phone FROM professionals WHERE user_id = :uid LIMIT 1"),
                 {"uid": user_id},
             ).mappings().first()
             if not row:
                 raise HTTPException(status_code=400, detail="Professional profile missing")
             profile["professional_id"] = row["id"]
+            profile["license_number"] = row.get("license_number")
+            profile["speciality"] = row.get("speciality")
+            profile["rol"] = row.get("rol")
+            profile["phone"] = row.get("phone")
 
         elif role == "patient":
             row = db.execute(

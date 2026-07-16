@@ -52,7 +52,7 @@ async def get_patients(
         params = {}
         
         # Filtrar según rol
-        if current_user.role == "admin":
+        if current_user.role in ("admin", "secretary"):
             # Admin ve todo, puede aplicar filtros opcionales
             if company_id:
                 query = text(query.text + " AND company_id = :company_id")
@@ -92,7 +92,7 @@ async def get_patients(
                 params["user_id"] = user_id
         
         else:
-            raise HTTPException(status_code=403, detail="Only admin, company owners, or professionals can list patients")
+            raise HTTPException(status_code=403, detail="Only admin, secretary, company owners, or professionals can list patients")
         
         rows = db.execute(query, params).mappings().all()
         patients = [_format_patient(row) for row in rows]
@@ -146,8 +146,8 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
             raise HTTPException(status_code=404, detail="Patient not found")
         
         # Validar acceso según rol
-        if current_user.role == "admin":
-            # Admin ve todo
+        if current_user.role in ("admin", "secretary"):
+            # Admin/secretary ve todo
             pass
         elif current_user.role == "professional":
             # Profesional ve a cualquier paciente
@@ -210,7 +210,7 @@ async def update_patient(
             raise HTTPException(status_code=404, detail="Patient not found")
 
         # Control de acceso
-        if current_user.role == "admin":
+        if current_user.role in ("admin", "secretary"):
             pass
         elif current_user.role == "patient":
             if row["user_id"] != current_user.id:
@@ -310,7 +310,7 @@ def _delete_file_from_url(url: str, directory) -> None:
 @router.delete("/{patient_id}", tags=["Patients"])
 async def delete_patient(
     patient_id: str,
-    current_user: User = Depends(require_roles("admin"))
+    current_user: User = Depends(require_roles("admin", "secretary"))
 ):
     """Eliminar un paciente y TODOS sus datos relacionados:
     - medical_record (y todas sus sub-tablas + archivos físicos)
