@@ -147,10 +147,12 @@ async def create_employee(
         # 2) Crear el registro en patients vinculado al user_id recién creado
         patient_id = str(uuid.uuid4())
         
-        # Convertir DNI a int para la tabla patients
+        # Convertir DNI a int para la tabla patients - strip non-digits first
         dni_int = 0
-        if dni and dni.isdigit():
-            dni_int = int(dni)
+        if dni:
+            clean_dni = "".join(filter(str.isdigit, str(dni)))
+            if clean_dni:
+                dni_int = int(clean_dni)
         
         db.execute(text("""
             INSERT INTO patients (id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type)
