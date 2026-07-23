@@ -115,10 +115,12 @@ async def register_patient(
         # Create patient profile
         patient_id = str(uuid.uuid4())
         
-        # Handle DNI conversion (str to int safely)
+        # Handle DNI conversion (str to int safely) - strip non-digits first
         dni_int = 0
-        if dni and dni.isdigit():
-            dni_int = int(dni)
+        if dni:
+            clean_dni = "".join(filter(str.isdigit, str(dni)))
+            if clean_dni:
+                dni_int = int(clean_dni)
 
         db.execute(
             text("""
@@ -161,6 +163,8 @@ async def register_company(
     last_name: str = Form(default=""),
     phone: str = Form(default="")
 ):
+    # Normalize phone: frontend sends 'phone', form may also have 'company_phone'
+    resolved_phone = phone or company_phone
 
     existing_user = get_user_by_email(email)
     if existing_user:
@@ -176,7 +180,7 @@ async def register_company(
         hashed_password=hashed_password,
         first_name=first_name,
         last_name=last_name,
-        phone=phone,
+        phone=resolved_phone,
         dni="",
         date_of_birth="",
         role="company",
@@ -203,7 +207,7 @@ async def register_company(
                 "responsable": responsable_name,
                 "cuit": cuit,
                 "email": email,
-                "phone": company_phone,
+                "phone": resolved_phone,
                 "address": company_address,
                 "owner_id": user_id,
             }
@@ -227,7 +231,8 @@ async def register_professional(
     speciality: str = Form(...),
     first_name: str = Form(default=""),
     last_name: str = Form(default=""),
-    phone: str = Form(default="")
+    phone: str = Form(default=""),
+    dni: str = Form(default="")
 ):
     """Registra un nuevo profesional"""
     existing_user = get_user_by_email(email)
@@ -245,7 +250,7 @@ async def register_professional(
         first_name=first_name,
         last_name=last_name,
         phone=phone,
-        dni="",
+        dni=dni,
         date_of_birth="",
         role="professional",
         is_active=True,
