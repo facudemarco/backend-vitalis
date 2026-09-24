@@ -794,6 +794,13 @@ async def update_medical_record(
 
                  if existing_sub:
                      # UPDATE
+                     validation_data = {
+                         **field_value,
+                         "id": existing_sub["id"],
+                         "medical_record_id": record_id,
+                     }
+                     _validate_required_columns(db, field_name, validation_data)
+
                      # Remove 'id' and 'medical_record_id' from update dict to avoid modifying PK/FK
                      update_data = {k: v for k, v in field_value.items() if k not in ["id", "medical_record_id"]}
                      
@@ -816,6 +823,7 @@ async def update_medical_record(
                           insert_data["id"] = mr_data_id
 
                      insert_data["medical_record_id"] = record_id
+                     _validate_required_columns(db, field_name, insert_data)
                      
                      cols = ", ".join(insert_data.keys())
                      vals = ", ".join([f":{k}" for k in insert_data.keys()])
@@ -1017,9 +1025,12 @@ async def update_medical_record(
         db.commit()
         return {"detail": "Updated successfully with file management"}
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error updating medical record")
 
     finally:
         db.close()
