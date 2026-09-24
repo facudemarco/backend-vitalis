@@ -96,6 +96,7 @@ async def create_study(
         consent_study = study_type.strip().casefold() == "consentimiento informado"
         study_files = study_files or []
 
+        consent_id_to_complete = None
         if consent_study:
             if current_user.role not in ("admin", "professional"):
                 raise HTTPException(
@@ -131,21 +132,36 @@ async def create_study(
             if not patient:
                 raise HTTPException(status_code=404, detail="Patient not found")
 
-            existing_consent = db.execute(
+            existing_consents = db.execute(
                 text("""
                     SELECT id
                     FROM studies
                     WHERE patient_id = :patient_id
                       AND LOWER(TRIM(study_type)) = 'consentimiento informado'
-                    LIMIT 1
+                    ORDER BY created_at ASC
+                    FOR UPDATE
                 """),
                 {"patient_id": patient_id}
-            ).mappings().first()
-            if existing_consent:
+            ).mappings().all()
+
+            if len(existing_consents) > 1:
                 raise HTTPException(
                     status_code=409,
-                    detail="Este paciente ya tiene un consentimiento informado registrado"
+                    detail="Este paciente tiene registros duplicados de consentimiento informado. Eliminá los duplicados antes de adjuntar el PDF."
                 )
+            if existing_consents:
+                existing_consent_id = existing_consents[0]["id"]
+                existing_file = db.execute(
+                    text("SELECT id FROM study_files WHERE study_id = :study_id LIMIT 1"),
+                    {"study_id": existing_consent_id}
+                ).mappings().first()
+                if existing_file:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Este paciente ya tiene un consentimiento informado con PDF registrado"
+                    )
+                # Complete a legacy consent row created before PDF upload was required.
+                consent_id_to_complete = existing_consent_id
 
             status = "Disponible"
         elif not study_files:
@@ -170,24 +186,30 @@ async def create_study(
             else:
                 raise HTTPException(status_code=403, detail="Invalid professional role")
 
-        study_id = str(uuid.uuid4())
+        study_id = str(consent_id_to_complete or uuid.uuid4())
         created_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
-        # Insert Study
-        db.execute(
-            text("""
-                INSERT INTO studies (id, patient_id, created_by_user_id, study_type, status, created_at)
-                VALUES (:id, :patient_id, :created_by_user_id, :study_type, :status, :created_at)
-            """),
-            {
-                "id": study_id,
-                "patient_id": patient_id,
-                "created_by_user_id": current_user.id,
-                "study_type": study_type,
-                "status": status,
-                "created_at": created_at
-            }
-        )
+        # Reuse an incomplete legacy consent instead of creating a second row.
+        if not consent_id_to_complete:
+            db.execute(
+                text("""
+                    INSERT INTO studies (id, patient_id, created_by_user_id, study_type, status, created_at)
+                    VALUES (:id, :patient_id, :created_by_user_id, :study_type, :status, :created_at)
+                """),
+                {
+                    "id": study_id,
+                    "patient_id": patient_id,
+                    "created_by_user_id": current_user.id,
+                    "study_type": study_type,
+                    "status": status,
+                    "created_at": created_at
+                }
+            )
+        else:
+            db.execute(
+                text("UPDATE studies SET status = :status WHERE id = :study_id"),
+                {"status": status, "study_id": study_id}
+            )
 
         uploaded_files_data = []
 
