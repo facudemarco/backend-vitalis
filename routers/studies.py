@@ -85,7 +85,7 @@ async def create_study(
     patient_id: str,
     study_type: str = Form(...),
     status: str = Form(...),
-    study_files: List[UploadFile] = File(...),
+    study_files: Optional[List[UploadFile]] = File(None),
     current_user: User = Depends(require_roles("admin", "professional", "secretary"))
 ):
     db = getConnectionForLogin()
@@ -93,8 +93,26 @@ async def create_study(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
+        no_report_study = study_type.strip().casefold() == "consentimiento informado"
+        study_files = study_files or []
+
+        if no_report_study:
+            if current_user.role not in ("admin", "professional"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Solo administradores y profesionales pueden registrar este estudio"
+                )
+            if study_files:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Consentimiento informado no requiere adjuntar un informe"
+                )
+            status = "Disponible"
+        elif not study_files:
+            raise HTTPException(status_code=422, detail="Debe adjuntar el archivo del estudio")
+
         # Check professional's role
-        if current_user.role == "professional":
+        if not no_report_study and current_user.role == "professional":
             prof_row = db.execute(
                 text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
                 {"uid": current_user.id}
@@ -134,7 +152,7 @@ async def create_study(
         uploaded_files_data = []
 
         # Process Files
-        for file in study_files:
+        for file in (study_files or []):
             if not os.path.exists(STUDIES_DIR):
                 os.makedirs(STUDIES_DIR, exist_ok=True)
             
@@ -184,6 +202,7 @@ async def create_study(
         }
 
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
