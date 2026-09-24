@@ -16,6 +16,7 @@ app = FastAPI(root_path="/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis/api")
 origins = [
     "http://localhost",
     "http://localhost:3000",
+    "http://localhost:3001",
     "https://saludvitalis.org",
     "https://www.saludvitalis.org",
     "https://vitalis-website.vercel.app",
