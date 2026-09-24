@@ -1,10 +1,10 @@
 -- Run only after removing duplicate "Consentimiento informado" rows for each patient.
 -- Other study types may still be uploaded more than once per patient.
--- Keep the generated expression compatible with older MySQL/MariaDB versions
--- by avoiding LOWER/TRIM on the indexed expression.
+-- studies.patient_id and studies.study_type use utf8mb4_unicode_ci, so the
+-- generated key uses the same charset/collation as patient_id.
 ALTER TABLE studies
     ADD COLUMN consent_patient_unique_key CHAR(36)
-        CHARACTER SET ascii COLLATE ascii_bin
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
         GENERATED ALWAYS AS (
             CASE
                 WHEN study_type = 'Consentimiento informado'
