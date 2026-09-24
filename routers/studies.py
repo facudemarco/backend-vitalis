@@ -168,7 +168,7 @@ async def create_study(
             raise HTTPException(status_code=422, detail="Debe adjuntar el archivo del estudio")
 
         # Check professional's role
-        if not no_report_study and current_user.role == "professional":
+        if not consent_study and current_user.role == "professional":
             prof_row = db.execute(
                 text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
                 {"uid": current_user.id}
