@@ -393,6 +393,7 @@ class MedicalRecordStudies(BaseModel):
     laboratorio: Optional[bool] = None
     drogas_abuso: Optional[bool] = None
     test_cereal: Optional[bool] = None
+    examen_fisico: Optional[bool] = None
     observations: Optional[str] = None
 
 class MedicalRecordSurgerys(BaseModel):
@@ -414,6 +415,7 @@ class MedicalRecordSurgerys(BaseModel):
     testiculos_date: Optional[str] = None
     others: Optional[bool] = None
     others_date: Optional[str] = None
+    others_description: Optional[str] = None
 
 class MedicalRecordCuestionarioRiesgos(BaseModel):
     id: Optional[str] = None
