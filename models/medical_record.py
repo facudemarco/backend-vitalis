@@ -393,6 +393,7 @@ class MedicalRecordStudies(BaseModel):
     laboratorio: Optional[bool] = None
     drogas_abuso: Optional[bool] = None
     test_cereal: Optional[bool] = None
+    examen_fisico: Optional[bool] = None
     observations: Optional[str] = None
 
 class MedicalRecordSurgerys(BaseModel):
@@ -414,6 +415,7 @@ class MedicalRecordSurgerys(BaseModel):
     testiculos_date: Optional[str] = None
     others: Optional[bool] = None
     others_date: Optional[str] = None
+    others_description: Optional[str] = None
 
 class MedicalRecordCuestionarioRiesgos(BaseModel):
     id: Optional[str] = None
@@ -524,10 +526,25 @@ class MedicalRecordFullRequest(BaseModel):
     def validate_to_json(cls, value: Any) -> Any:
         if isinstance(value, str):
             try:
-                return json.loads(value)
+                value = json.loads(value)
             except json.JSONDecodeError as e:
                 raise ValueError(f"Invalid JSON string: {e}")
-        return value
+
+        # HTML inputs can submit empty numeric fields as "". Convert blank values
+        # before Pydantic validates nested Optional[int]/Optional[float] fields.
+        # This also normalizes blank optional text inputs and Swagger placeholders.
+        def normalize_empty_fields(item: Any) -> Any:
+            if isinstance(item, dict):
+                return {key: normalize_empty_fields(field_value) for key, field_value in item.items()}
+            if isinstance(item, list):
+                return [normalize_empty_fields(field_value) for field_value in item]
+            if isinstance(item, str):
+                normalized = item.strip()
+                if not normalized or normalized.casefold() == "string":
+                    return None
+            return item
+
+        return normalize_empty_fields(value)
 
 class MedicalRecordFullResponse(BaseModel):
     id: str

@@ -85,7 +85,7 @@ async def create_study(
     patient_id: str,
     study_type: str = Form(...),
     status: str = Form(...),
-    study_files: List[UploadFile] = File(...),
+    study_files: Optional[List[UploadFile]] = File(None),
     current_user: User = Depends(require_roles("admin", "professional", "secretary"))
 ):
     db = getConnectionForLogin()
@@ -93,8 +93,82 @@ async def create_study(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
+        consent_study = study_type.strip().casefold() == "consentimiento informado"
+        study_files = study_files or []
+
+        consent_id_to_complete = None
+        if consent_study:
+            if current_user.role not in ("admin", "professional"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Solo administradores y profesionales pueden registrar este estudio"
+                )
+            if len(study_files) != 1:
+                raise HTTPException(
+                    status_code=422,
+                    detail="El consentimiento informado requiere exactamente un archivo PDF"
+                )
+
+            consent_file = study_files[0]
+            if Path(consent_file.filename or "").suffix.lower() != ".pdf":
+                raise HTTPException(
+                    status_code=422,
+                    detail="El consentimiento informado debe adjuntarse en formato PDF"
+                )
+
+            pdf_header = await consent_file.read(5)
+            if pdf_header != b"%PDF-":
+                raise HTTPException(
+                    status_code=422,
+                    detail="El archivo seleccionado no parece ser un PDF válido"
+                )
+            await consent_file.seek(0)
+
+            # Lock the patient row so concurrent requests cannot create duplicate consents.
+            patient = db.execute(
+                text("SELECT id FROM patients WHERE id = :patient_id FOR UPDATE"),
+                {"patient_id": patient_id}
+            ).mappings().first()
+            if not patient:
+                raise HTTPException(status_code=404, detail="Patient not found")
+
+            existing_consents = db.execute(
+                text("""
+                    SELECT id
+                    FROM studies
+                    WHERE patient_id = :patient_id
+                      AND LOWER(TRIM(study_type)) = 'consentimiento informado'
+                    ORDER BY created_at ASC
+                    FOR UPDATE
+                """),
+                {"patient_id": patient_id}
+            ).mappings().all()
+
+            if len(existing_consents) > 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Este paciente tiene registros duplicados de consentimiento informado. Eliminá los duplicados antes de adjuntar el PDF."
+                )
+            if existing_consents:
+                existing_consent_id = existing_consents[0]["id"]
+                existing_file = db.execute(
+                    text("SELECT id FROM study_files WHERE study_id = :study_id LIMIT 1"),
+                    {"study_id": existing_consent_id}
+                ).mappings().first()
+                if existing_file:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Este paciente ya tiene un consentimiento informado con PDF registrado"
+                    )
+                # Complete a legacy consent row created before PDF upload was required.
+                consent_id_to_complete = existing_consent_id
+
+            status = "Disponible"
+        elif not study_files:
+            raise HTTPException(status_code=422, detail="Debe adjuntar el archivo del estudio")
+
         # Check professional's role
-        if current_user.role == "professional":
+        if not consent_study and current_user.role == "professional":
             prof_row = db.execute(
                 text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
                 {"uid": current_user.id}
@@ -112,34 +186,40 @@ async def create_study(
             else:
                 raise HTTPException(status_code=403, detail="Invalid professional role")
 
-        study_id = str(uuid.uuid4())
+        study_id = str(consent_id_to_complete or uuid.uuid4())
         created_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
-        # Insert Study
-        db.execute(
-            text("""
-                INSERT INTO studies (id, patient_id, created_by_user_id, study_type, status, created_at)
-                VALUES (:id, :patient_id, :created_by_user_id, :study_type, :status, :created_at)
-            """),
-            {
-                "id": study_id,
-                "patient_id": patient_id,
-                "created_by_user_id": current_user.id,
-                "study_type": study_type,
-                "status": status,
-                "created_at": created_at
-            }
-        )
+        # Reuse an incomplete legacy consent instead of creating a second row.
+        if not consent_id_to_complete:
+            db.execute(
+                text("""
+                    INSERT INTO studies (id, patient_id, created_by_user_id, study_type, status, created_at)
+                    VALUES (:id, :patient_id, :created_by_user_id, :study_type, :status, :created_at)
+                """),
+                {
+                    "id": study_id,
+                    "patient_id": patient_id,
+                    "created_by_user_id": current_user.id,
+                    "study_type": study_type,
+                    "status": status,
+                    "created_at": created_at
+                }
+            )
+        else:
+            db.execute(
+                text("UPDATE studies SET status = :status WHERE id = :study_id"),
+                {"status": status, "study_id": study_id}
+            )
 
         uploaded_files_data = []
 
         # Process Files
-        for file in study_files:
+        for file in (study_files or []):
             if not os.path.exists(STUDIES_DIR):
                 os.makedirs(STUDIES_DIR, exist_ok=True)
             
             # Normalize filename and ensure uniqueness
-            ext = get_file_extension(file)
+            ext = ".pdf" if consent_study else get_file_extension(file)
             fname = f"{uuid.uuid4()}{ext}"
             path = os.path.join(STUDIES_DIR, fname)
             
@@ -164,7 +244,7 @@ async def create_study(
                     "study_id": study_id,
                     "file_path": url_main,
                     "original_filename": file.filename,
-                    "mime_type": file.content_type,
+                    "mime_type": "application/pdf" if consent_study else file.content_type,
                     "size_bytes": size_bytes,
                     "uploaded_at": now
                 }
@@ -184,6 +264,7 @@ async def create_study(
         }
 
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
