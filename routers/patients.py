@@ -351,6 +351,8 @@ async def delete_patient(
             "medical_record_immunizations", "medical_record_laboral_contacts",
             "medical_record_laboral_exam", "medical_record_laboral_history",
             "medical_record_neuro_clinical_exam", "medical_record_oftalmologico_exam",
+            "medical_record_oftalmologico_medical_exam", "medical_record_patient_signatures",
+            "medical_record_medical_responsable_signatures",
             "medical_record_orl_exam", "medical_record_osteoarticular_exam",
             "medical_record_personal_history", "medical_record_previous_problems",
             "medical_record_psychiatric_clinical_exam", "medical_record_recomendations",
@@ -376,6 +378,16 @@ async def delete_patient(
                 {"rid": rid}
             ).mappings().all():
                 _delete_file_from_url(l_sig["url"], _SIGNATURES_DIR)
+
+            for signature_table in (
+                "medical_record_patient_signatures",
+                "medical_record_medical_responsable_signatures",
+            ):
+                for sig in db.execute(
+                    text(f"SELECT url FROM {signature_table} WHERE medical_record_id = :rid"),
+                    {"rid": rid}
+                ).mappings().all():
+                    _delete_file_from_url(sig["url"], _SIGNATURES_DIR)
 
             # B. Recolectar y borrar archivos físicos de data images
             for dr in db.execute(
