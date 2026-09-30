@@ -67,6 +67,7 @@ def _format_study(row) -> dict:
         # "description": row["description"],
         # "status": row["status"], # Removed as column doesn't exist
         "created_at": row.get("created_at"),
+        "requires_report": bool(row.get("requires_report", True)),
     }
 
 def _check_access_to_patient(current_user: User, patient_id: str, db):
@@ -236,8 +237,8 @@ async def create_study(
             # Insert File Record
             db.execute(
                 text("""
-                    INSERT INTO study_files (id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at)
-                    VALUES (:id, :study_id, :file_path, :original_filename, :mime_type, :size_bytes, :uploaded_at)
+                    INSERT INTO study_files (id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at, is_report)
+                    VALUES (:id, :study_id, :file_path, :original_filename, :mime_type, :size_bytes, :uploaded_at, :is_report)
                 """),
                 {
                     "id": file_id,
@@ -246,7 +247,8 @@ async def create_study(
                     "original_filename": file.filename,
                     "mime_type": "application/pdf" if consent_study else file.content_type,
                     "size_bytes": size_bytes,
-                    "uploaded_at": now
+                    "uploaded_at": now,
+                    "is_report": False
                 }
             )
             
@@ -281,9 +283,16 @@ async def get_studies(patient_id: str):
     try:
         rows = db.execute(
             text("""
-                SELECT id, patient_id, created_by_user_id, study_type, status, created_at
-                FROM studies
-                WHERE patient_id = :patient_id
+                SELECT
+                    s.id, s.patient_id, s.created_by_user_id, s.study_type, s.status, s.created_at,
+                    COALESCE((
+                        SELECT sa.requires_report
+                        FROM studies_admin sa
+                        WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                        LIMIT 1
+                    ), 1) AS requires_report
+                FROM studies s
+                WHERE s.patient_id = :patient_id
                 ORDER BY created_at DESC
             """),
             {"patient_id": patient_id}
@@ -296,7 +305,7 @@ async def get_studies(patient_id: str):
         # Fetch files for all studies matching the patient_id (which is safer and cleaner than passing a list of IDs)
         files_rows = db.execute(
             text("""
-                SELECT id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at
+                SELECT id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at, is_report
                 FROM study_files
                 WHERE study_id IN (
                     SELECT id FROM studies WHERE patient_id = :patient_id
@@ -323,7 +332,11 @@ async def get_studies(patient_id: str):
                 "study_type": row["study_type"],
                 "status": row["status"],
                 "created_at": row["created_at"],
-                "files": files_by_study.get(sid, [])
+                "requires_report": bool(row["requires_report"]),
+                "files": [
+                    {**file, "is_report": bool(file["is_report"])}
+                    for file in files_by_study.get(sid, [])
+                ]
             })
         
         return {"studies": studies, "total": len(studies)}
@@ -344,9 +357,16 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
     try:
         row = db.execute(
             text("""
-                SELECT id, patient_id, created_by_user_id, study_type, status, created_at
-                FROM studies
-                WHERE id = :sid
+                SELECT
+                    s.id, s.patient_id, s.created_by_user_id, s.study_type, s.status, s.created_at,
+                    COALESCE((
+                        SELECT sa.requires_report
+                        FROM studies_admin sa
+                        WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                        LIMIT 1
+                    ), 1) AS requires_report
+                FROM studies s
+                WHERE s.id = :sid
             """),
             {"sid": study_id}
         ).mappings().first()
@@ -360,7 +380,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
         
         files = db.execute(
             text("""
-                SELECT id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at
+                SELECT id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at, is_report
                 FROM study_files
                 WHERE study_id = :sid
             """),
@@ -374,6 +394,7 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
                 "mime_type": f["mime_type"],
                 "size_bytes": f["size_bytes"],
                 "uploaded_at": f["uploaded_at"],
+                "is_report": bool(f["is_report"]),
             } for f in files
         ]
         
@@ -451,7 +472,7 @@ async def update_study(
     
     try:
         row = db.execute(
-            text("SELECT created_by_user_id FROM studies WHERE id = :sid"),
+            text("SELECT created_by_user_id, study_type FROM studies WHERE id = :sid"),
             {"sid": study_id}
         ).mappings().first()
         
@@ -471,6 +492,30 @@ async def update_study(
                 if rol != "especialista":
                     raise HTTPException(status_code=403, detail="Only specialists can change study status")
         
+        if status == "Disponible":
+            effective_study_type = study_type or row["study_type"]
+            requires_report = db.execute(
+                text("""
+                    SELECT requires_report
+                    FROM studies_admin
+                    WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                    LIMIT 1
+                """),
+                {"study_type": effective_study_type}
+            ).scalar()
+
+            # Unmatched legacy types keep the existing required-report behavior.
+            if requires_report is None or bool(requires_report):
+                report_id = db.execute(
+                    text("SELECT id FROM study_files WHERE study_id = :sid AND is_report = 1 LIMIT 1"),
+                    {"sid": study_id}
+                ).scalar()
+                if not report_id:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Esta categoría requiere adjuntar un informe antes de confirmar el estudio."
+                    )
+
         updates = []
         params = {"sid": study_id}
         
@@ -551,6 +596,7 @@ async def delete_study(
 async def upload_study_file(
     study_id: str,
     file: UploadFile = File(...),
+    is_report: bool = Form(False),
     current_user: User = Depends(require_active_user)
 ):
     db = getConnectionForLogin()
@@ -589,8 +635,8 @@ async def upload_study_file(
 
         db.execute(text("""
             INSERT INTO study_files
-            (id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at)
-            VALUES (:id, :study_id, :file_path, :original_filename, :mime_type, :size_bytes, :uploaded_at)
+            (id, study_id, file_path, original_filename, mime_type, size_bytes, uploaded_at, is_report)
+            VALUES (:id, :study_id, :file_path, :original_filename, :mime_type, :size_bytes, :uploaded_at, :is_report)
         """), {
             "id": file_id,
             "study_id": study_id,
@@ -599,6 +645,7 @@ async def upload_study_file(
             "mime_type": file.content_type,
             "size_bytes": size_bytes,
             "uploaded_at": now,
+            "is_report": is_report,
         })
         
         db.commit()
@@ -671,6 +718,7 @@ async def delete_study_file(
 @router.post("/admin/create_study_category", tags=["Studies Admin"])
 async def create_study_category(
     name: str = Form(...),
+    requires_report: bool = Form(True),
     image: UploadFile = File(None),
 ):
     db = getConnectionForLogin()
@@ -695,8 +743,13 @@ async def create_study_category(
             url_image = f"{base_url}/{stored_filename}"
             
             db.execute(
-                text("INSERT INTO studies_admin (id, name, url_image) VALUES (:id, :name, :url_image)"),
-                {"id": id, "name": name, "url_image": url_image}
+                text("INSERT INTO studies_admin (id, name, url_image, requires_report) VALUES (:id, :name, :url_image, :requires_report)"),
+                {
+                    "id": id,
+                    "name": name,
+                    "url_image": url_image,
+                    "requires_report": requires_report
+                }
             )
         
         db.commit()
@@ -719,7 +772,7 @@ async def get_study_categories():
     
     try:
         result = db.execute(
-            text("SELECT id, name, url_image FROM studies_admin")
+            text("SELECT id, name, url_image, requires_report FROM studies_admin")
         ).mappings().all()
         
         return {"studies_categories": [dict(row) for row in result]}
@@ -735,6 +788,7 @@ async def get_study_categories():
 async def update_study_category(
     study_id: str,
     name: str = Form(...),
+    requires_report: bool = Form(True),
     image: UploadFile = File(None),
 ):
     db = getConnectionForLogin()
@@ -774,14 +828,19 @@ async def update_study_category(
             url_image = f"{base_url}/{stored_filename}"
             
             db.execute(
-                text("UPDATE studies_admin SET name = :name, url_image = :url_image WHERE id = :id"),
-                {"id": study_id, "name": name, "url_image": url_image}
+                text("UPDATE studies_admin SET name = :name, url_image = :url_image, requires_report = :requires_report WHERE id = :id"),
+                {
+                    "id": study_id,
+                    "name": name,
+                    "url_image": url_image,
+                    "requires_report": requires_report
+                }
             )
         else:
             # Only update name if no image provided
             db.execute(
-                text("UPDATE studies_admin SET name = :name WHERE id = :id"),
-                {"id": study_id, "name": name}
+                text("UPDATE studies_admin SET name = :name, requires_report = :requires_report WHERE id = :id"),
+                {"id": study_id, "name": name, "requires_report": requires_report}
             )
         
         db.commit()
