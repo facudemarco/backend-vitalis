@@ -154,9 +154,9 @@ async def register_patient(
 async def register_company(
     email: str = Form(...), 
     password: str = Form(...),
-    company_name: str = Form(...),
-    responsable_name: str = Form(...),
-    cuit: str = Form(...),
+    company_name: str = Form(default=""),
+    responsable_name: str = Form(default=""),
+    cuit: str = Form(default=""),
     company_phone: str = Form(default=""),
     company_address: str = Form(default=""),
     first_name: str = Form(default=""),
