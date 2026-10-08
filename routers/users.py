@@ -1,9 +1,10 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from models.user import User, professionals
 from auth.authentication import require_roles, require_active_user
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
+from Database.users import hash_password
 
 router = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
 
@@ -177,7 +178,7 @@ async def get_users_by_state(state: str, current_user: User = Depends(require_ro
 @router.get("/role/{role}", tags=["Admin - Users"])
 async def get_users_by_role(role: str, current_user: User = Depends(require_roles("admin"))):
     """Filtrar usuarios por rol (solo admin)"""
-    valid_roles = ["admin", "company", "professional", "patient"]
+    valid_roles = ["admin", "company", "professional", "patient", "secretary"]
     if role.lower() not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(valid_roles)}")
     
@@ -476,6 +477,206 @@ async def update_company_profile(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="Error updating company: " + str(e))
+    finally:
+        db.close()
+
+
+# ==================== ADMIN PROFILE MANAGEMENT ====================
+
+@router.put("/{user_id}/profile", tags=["Admin - Users"])
+async def update_user_profile(
+    user_id: str,
+    first_name: Optional[str] = Form(default=None),
+    last_name: Optional[str] = Form(default=None),
+    email: Optional[str] = Form(default=None),
+    dni: Optional[str] = Form(default=None),
+    date_of_birth: Optional[str] = Form(default=None),
+    phone: Optional[str] = Form(default=None),
+    address: Optional[str] = Form(default=None),
+    social_security: Optional[str] = Form(default=None),
+    company_name: Optional[str] = Form(default=None),
+    responsable_name: Optional[str] = Form(default=None),
+    cuit: Optional[str] = Form(default=None),
+    company_address: Optional[str] = Form(default=None),
+    license_number: Optional[str] = Form(default=None),
+    rol: Optional[str] = Form(default=None),
+    speciality: Optional[str] = Form(default=None),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Actualiza datos de cuenta y perfil; disponible solo para administradores."""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if email is not None:
+            normalized_email = email.strip().lower()
+            existing = db.query(User).filter(
+                User.email == normalized_email,
+                User.id != user_id,
+            ).first()
+            if existing:
+                raise HTTPException(status_code=409, detail="Email is already in use")
+            user.email = normalized_email
+
+        for field, value in (
+            ("first_name", first_name),
+            ("last_name", last_name),
+            ("dni", dni),
+            ("date_of_birth", date_of_birth),
+            ("phone", phone),
+        ):
+            if value is not None:
+                setattr(user, field, value)
+
+        if user.role == "patient" and any(
+            value is not None for value in (address, social_security)
+        ):
+            patient = db.execute(
+                text("SELECT id FROM patients WHERE user_id = :uid LIMIT 1"),
+                {"uid": user_id},
+            ).first()
+            if not patient:
+                raise HTTPException(status_code=404, detail="Patient profile not found")
+            db.execute(
+                text("""
+                    UPDATE patients
+                    SET address = COALESCE(:address, address),
+                        social_security = COALESCE(:social_security, social_security)
+                    WHERE user_id = :uid
+                """),
+                {"address": address, "social_security": social_security, "uid": user_id},
+            )
+
+        elif user.role == "professional" and any(
+            value is not None for value in (license_number, rol, speciality, phone)
+        ):
+            professional = db.execute(
+                text("SELECT id FROM professionals WHERE user_id = :uid LIMIT 1"),
+                {"uid": user_id},
+            ).first()
+            if not professional:
+                raise HTTPException(status_code=404, detail="Professional profile not found")
+
+            phone_number = None
+            update_phone = False
+            if phone is not None:
+                digits = "".join(character for character in phone if character.isdigit())
+                if not digits:
+                    update_phone = True
+                elif len(digits) <= 9:
+                    phone_number = int(digits)
+                    update_phone = True
+
+            db.execute(
+                text("""
+                    UPDATE professionals
+                    SET license_number = COALESCE(:license_number, license_number),
+                        rol = COALESCE(:rol, rol),
+                        speciality = COALESCE(:speciality, speciality),
+                        phone = CASE WHEN :update_phone THEN :phone_number ELSE phone END
+                    WHERE user_id = :uid
+                """),
+                {
+                    "license_number": license_number,
+                    "rol": rol,
+                    "speciality": speciality,
+                    "update_phone": update_phone,
+                    "phone_number": phone_number,
+                    "uid": user_id,
+                },
+            )
+
+        elif user.role == "company" and any(
+            value is not None
+            for value in (company_name, responsable_name, cuit, phone, company_address, email)
+        ):
+            company = db.execute(
+                text("SELECT id FROM companies WHERE owner_user_id = :uid LIMIT 1"),
+                {"uid": user_id},
+            ).first()
+            if not company:
+                raise HTTPException(status_code=404, detail="Company profile not found")
+            db.execute(
+                text("""
+                    UPDATE companies
+                    SET name = COALESCE(:name, name),
+                        responsable_name = COALESCE(:responsable_name, responsable_name),
+                        cuit = COALESCE(:cuit, cuit),
+                        email = COALESCE(:email, email),
+                        phone = COALESCE(:phone, phone),
+                        address = COALESCE(:address, address)
+                    WHERE owner_user_id = :uid
+                """),
+                {
+                    "name": company_name,
+                    "responsable_name": responsable_name,
+                    "cuit": cuit,
+                    "email": email.strip().lower() if email is not None else None,
+                    "phone": phone,
+                    "address": company_address,
+                    "uid": user_id,
+                },
+            )
+
+        db.commit()
+        db.refresh(user)
+        return {
+            "detail": "User profile updated successfully",
+            "user": _format_user({
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "dni": user.dni,
+                "date_of_birth": user.date_of_birth,
+                "phone": user.phone,
+                "role": user.role,
+                "is_active": user.is_active,
+                "created_at": getattr(user, "created_at", None),
+            }),
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating user profile")
+    finally:
+        db.close()
+
+
+@router.put("/{user_id}/password", tags=["Admin - Users"])
+async def reset_user_password(
+    user_id: str,
+    password: str = Form(...),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Restablece la contraseña de un usuario sin verificación; solo admin."""
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must contain at least 8 characters")
+
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.hashed_password = hash_password(password)
+        db.commit()
+        return {"detail": "Password reset successfully", "user_id": user_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error resetting password")
     finally:
         db.close()
 
