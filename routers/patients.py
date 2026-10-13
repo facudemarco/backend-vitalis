@@ -292,7 +292,7 @@ async def update_patient(
 
 # ==================== DELETE PATIENT ====================
 
-from services.data_deletion import delete_related_records, remove_related_files, summarize_related_records
+from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records
 
 
 @router.get("/{patient_id}/deletion-summary", tags=["Patients"])
@@ -319,6 +319,7 @@ async def get_patient_deletion_summary(
             "patient_id": patient_id,
             "patient_name": " ".join(part for part in (patient["first_name"], patient["last_name"]) if part) or "Paciente",
             "related_data": related,
+            "confirmation_token": deletion_confirmation_token(db, roots),
         }
     except HTTPException:
         raise
@@ -332,10 +333,11 @@ async def get_patient_deletion_summary(
 async def delete_patient(
     patient_id: str,
     confirmed: bool = Query(False),
+    confirmation_token: str = Query(""),
     current_user: User = Depends(require_roles("admin")),
 ):
     """Elimina paciente y todos los registros relacionados, solo tras confirmación explícita."""
-    if not confirmed:
+    if not confirmed or not confirmation_token:
         raise HTTPException(status_code=400, detail="Confirm deletion of the patient and all related data")
 
     db = getConnectionForLogin()
@@ -352,6 +354,8 @@ async def delete_patient(
         roots = [("patients", patient_id)]
         if patient["user_id"]:
             roots.append(("users", str(patient["user_id"])))
+        if deletion_confirmation_token(db, roots) != confirmation_token:
+            raise HTTPException(status_code=409, detail="Related data changed; retrieve a new deletion summary")
         files = delete_related_records(db, roots)
         db.commit()
         remove_related_files(files)
