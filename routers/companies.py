@@ -7,6 +7,7 @@ import uuid
 from services.data_deletion import (
     company_deletion_roots,
     delete_related_records,
+    deletion_confirmation_token,
     remove_related_files,
     summarize_related_records,
 )
@@ -225,6 +226,7 @@ async def get_company_deletion_summary(
             ],
             "employee_count": len(employee_ids),
             "related_data": summarize_related_records(db, roots),
+            "confirmation_token": deletion_confirmation_token(db, roots),
         }
     except HTTPException:
         raise
@@ -238,10 +240,11 @@ async def get_company_deletion_summary(
 async def delete_company(
     company_id: str,
     confirmed: bool = Query(False),
+    confirmation_token: str = Query(""),
     current_user: User = Depends(require_roles("admin")),
 ):
     """Elimina empresa, empleados, cuentas y todos sus datos relacionados."""
-    if not confirmed:
+    if not confirmed or not confirmation_token:
         raise HTTPException(status_code=400, detail="Confirm deletion of the company and all related data")
 
     db = getConnectionForLogin()
@@ -251,6 +254,8 @@ async def delete_company(
         roots, employee_ids, owner_user_id = company_deletion_roots(db, company_id)
         if not roots:
             raise HTTPException(status_code=404, detail="Company not found")
+        if deletion_confirmation_token(db, roots) != confirmation_token:
+            raise HTTPException(status_code=409, detail="Related data changed; retrieve a new deletion summary")
 
         # Delete users belonging to employees as additional roots. The company FK
         # points to patient rows, while employee accounts are the referenced rows.
@@ -310,10 +315,11 @@ async def delete_employee(
     company_id: str,
     patient_id: str,
     confirmed: bool = Query(False),
+    confirmation_token: str = Query(""),
     current_user: User = Depends(require_roles("admin")),
 ):
     """Eliminación de empleado reservada a administradores y con confirmación."""
-    if not confirmed:
+    if not confirmed or not confirmation_token:
         raise HTTPException(status_code=400, detail="Confirm deletion of the employee and all related data")
 
     db = getConnectionForLogin()
@@ -330,6 +336,8 @@ async def delete_employee(
         roots = [("patients", patient_id)]
         if patient["user_id"]:
             roots.append(("users", str(patient["user_id"])))
+        if deletion_confirmation_token(db, roots) != confirmation_token:
+            raise HTTPException(status_code=409, detail="Related data changed; retrieve a new deletion summary")
         files = delete_related_records(db, roots)
         db.commit()
         remove_related_files(files)
