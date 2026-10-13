@@ -1,10 +1,11 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Query
 from models.user import User, professionals
 from auth.authentication import require_roles, require_active_user
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
 from Database.users import hash_password
+from services.data_deletion import delete_related_records, remove_related_files, summarize_related_records, user_deletion_roots
 
 router = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
 
@@ -789,40 +790,65 @@ async def deactivate_user(user_id: str, current_user: User = Depends(require_rol
     finally:
         db.close()
 
-@router.delete("/delete/{user_id}", tags=["Admin - Users"])
-async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
-    """Delete: eliminar usuario (solo admin) desvinculando de tablas dependientes"""
+@router.get("/{user_id}/deletion-summary", tags=["Admin - Users"])
+async def get_user_deletion_summary(
+    user_id: str,
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Vista previa de perfiles y datos asociados a una cuenta."""
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
-    
     try:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        
-        db.execute(text("SET SESSION foreign_key_checks = 0;"))
-        
-        db.execute(text("DELETE FROM patients WHERE user_id = :uid"), {"uid": user_id})
-        db.execute(text("DELETE FROM professionals WHERE user_id = :uid"), {"uid": user_id})
-        db.execute(text("DELETE FROM companies WHERE owner_user_id = :uid"), {"uid": user_id})
-        
-        db.delete(user)
-        db.commit()
-        
+        roots, _employee_user_ids = user_deletion_roots(db, user_id)
         return {
-            "detail": "User deleted successfully",
-            "user_id": user_id
+            "user_id": user_id,
+            "email": user.email,
+            "role": user.role,
+            "related_data": summarize_related_records(db, roots),
         }
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Error deleting user: " + str(e))
+        raise HTTPException(status_code=500, detail="Could not prepare deletion summary: " + str(e))
     finally:
-        try:
-            db.execute(text("SET SESSION foreign_key_checks = 1;"))
-            db.commit()
-        except:
-            pass
+        db.close()
+
+
+@router.delete("/delete/{user_id}", tags=["Admin - Users"])
+async def delete_user(
+    user_id: str,
+    confirmed: bool = Query(False),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Elimina la cuenta y todos sus datos relacionados tras confirmación explícita."""
+    if not confirmed:
+        raise HTTPException(status_code=400, detail="Confirm deletion of this user and all related data")
+
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        roots, employee_user_ids = user_deletion_roots(db, user_id)
+        files = delete_related_records(db, roots)
+        db.commit()
+        remove_related_files(files)
+        return {
+            "detail": "User and all related data deleted successfully",
+            "user_id": user_id,
+            "deleted_employee_account_count": len(employee_user_ids),
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deleting user and related data: " + str(e))
+    finally:
         db.close()
