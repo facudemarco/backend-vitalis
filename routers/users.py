@@ -1,10 +1,11 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Query
 from models.user import User, professionals
 from auth.authentication import require_roles, require_active_user
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
 from Database.users import hash_password
+from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records, user_deletion_roots
 
 router = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
 
@@ -450,8 +451,9 @@ async def update_company_profile(
     responsable_name: str = Form(default=""),
     cuit: str = Form(default=""),
     phone: str = Form(default=""),
+    email: Optional[str] = Form(default=None),
     address: str = Form(default=""),
-    current_user: User = Depends(require_roles("admin"))
+    current_user: User = Depends(require_roles("admin", "secretary"))
 ):
     """Actualiza la informacion en la tabla companies usando el owner_user_id"""
     db = getConnectionForLogin()
@@ -459,6 +461,23 @@ async def update_company_profile(
         raise HTTPException(status_code=500, detail="Database connection error")
         
     try:
+        if email is not None and email.strip():
+            normalized_email = email.strip().lower()
+            duplicate = db.query(User).filter(
+                User.email == normalized_email,
+                User.id != user_id,
+            ).first()
+            if duplicate:
+                raise HTTPException(status_code=409, detail="Email is already in use")
+            db.query(User).filter(User.id == user_id).update(
+                {User.email: normalized_email},
+                synchronize_session=False,
+            )
+            db.execute(
+                text("UPDATE companies SET email = :email WHERE owner_user_id = :uid"),
+                {"email": normalized_email, "uid": user_id},
+            )
+
         db.execute(text("""
             UPDATE companies
             SET name = :name, responsable_name = :responsable_name, cuit = :cuit,
@@ -472,6 +491,10 @@ async def update_company_profile(
             "address": address,
             "uid": user_id
         })
+        db.execute(
+            text("UPDATE users SET phone = :phone WHERE id = :uid"),
+            {"phone": phone, "uid": user_id},
+        )
         db.commit()
         return {"detail": "Company profile updated successfully", "user_id": user_id}
     except Exception as e:
@@ -767,40 +790,83 @@ async def deactivate_user(user_id: str, current_user: User = Depends(require_rol
     finally:
         db.close()
 
-@router.delete("/delete/{user_id}", tags=["Admin - Users"])
-async def delete_user(user_id: str, current_user: User = Depends(require_roles("admin"))):
-    """Delete: eliminar usuario (solo admin) desvinculando de tablas dependientes"""
+@router.get("/{user_id}/deletion-summary", tags=["Admin - Users"])
+async def get_user_deletion_summary(
+    user_id: str,
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Vista previa de perfiles y datos asociados a una cuenta."""
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
-    
     try:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        
-        db.execute(text("SET SESSION foreign_key_checks = 0;"))
-        
-        db.execute(text("DELETE FROM patients WHERE user_id = :uid"), {"uid": user_id})
-        db.execute(text("DELETE FROM professionals WHERE user_id = :uid"), {"uid": user_id})
-        db.execute(text("DELETE FROM companies WHERE owner_user_id = :uid"), {"uid": user_id})
-        
-        db.delete(user)
-        db.commit()
-        
+        roots, _employee_user_ids = user_deletion_roots(db, user_id)
+        company = db.execute(
+            text("SELECT id, name FROM companies WHERE owner_user_id = :user_id"),
+            {"user_id": user_id},
+        ).mappings().first() if user.role == "company" else None
+        employees = db.execute(
+            text("SELECT id, first_name, last_name FROM patients WHERE company_id = :company_id ORDER BY last_name, first_name"),
+            {"company_id": company["id"]},
+        ).mappings().all() if company else []
         return {
-            "detail": "User deleted successfully",
-            "user_id": user_id
+            "user_id": user_id,
+            "email": user.email,
+            "role": user.role,
+            "company_name": company["name"] if company else None,
+            "employee_count": len(employees) if company else None,
+            "employees": [
+                {"id": row["id"], "name": " ".join(part for part in (row["first_name"], row["last_name"]) if part) or "Empleado"}
+                for row in employees
+            ],
+            "related_data": summarize_related_records(db, roots),
+            "confirmation_token": deletion_confirmation_token(db, roots),
         }
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Error deleting user: " + str(e))
+        raise HTTPException(status_code=500, detail="Could not prepare deletion summary: " + str(e))
     finally:
-        try:
-            db.execute(text("SET SESSION foreign_key_checks = 1;"))
-            db.commit()
-        except:
-            pass
+        db.close()
+
+
+@router.delete("/delete/{user_id}", tags=["Admin - Users"])
+async def delete_user(
+    user_id: str,
+    confirmed: bool = Query(False),
+    confirmation_token: str = Query(""),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Elimina la cuenta y todos sus datos relacionados tras confirmación explícita."""
+    if not confirmed or not confirmation_token:
+        raise HTTPException(status_code=400, detail="Confirm deletion of this user and all related data")
+
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        roots, employee_user_ids = user_deletion_roots(db, user_id)
+        if deletion_confirmation_token(db, roots) != confirmation_token:
+            raise HTTPException(status_code=409, detail="Related data changed; retrieve a new deletion summary")
+        files = delete_related_records(db, roots)
+        db.commit()
+        remove_related_files(files)
+        return {
+            "detail": "User and all related data deleted successfully",
+            "user_id": user_id,
+            "deleted_employee_account_count": len(employee_user_ids),
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deleting user and related data: " + str(e))
+    finally:
         db.close()
