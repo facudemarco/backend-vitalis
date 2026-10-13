@@ -104,12 +104,14 @@ def _walk(db, table: str, row: dict[str, Any], seen: set[tuple[str, tuple[Any, .
         counts[table] = counts.get(table, 0) + 1
 
     if files is not None:
-        directory = STUDIES_DIR if table == "study_files" else (
+        directory = STUDIES_DIR if table in {"study_files", "studies"} else (
             DATA_IMAGES_DIR if table == "medical_record_data_img" else (
                 SIGNATURES_DIR if table in _SIGNATURE_TABLES else None
             )
         )
-        file_value = row.get("file_path") if table == "study_files" else row.get("url")
+        file_value = row.get("file_path") if table == "study_files" else (
+            row.get("study_file") if table == "studies" else row.get("url")
+        )
         if directory is not None and file_value:
             files.append((directory, str(file_value)))
 
