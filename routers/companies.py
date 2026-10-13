@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Query
 from models.user import User
 from auth.authentication import require_roles, require_active_user
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
 import uuid
+from services.data_deletion import (
+    company_deletion_roots,
+    delete_related_records,
+    remove_related_files,
+    summarize_related_records,
+)
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
@@ -186,75 +192,153 @@ async def create_employee(
     finally:
         db.close()
 
-# ==================== DELETE EMPLOYEE (PATIENT) ====================
+# ==================== DELETION PREVIEWS AND ADMIN DELETION ====================
+
+@router.get("/{company_id}/deletion-summary", tags=["Companies"])
+async def get_company_deletion_summary(
+    company_id: str,
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Vista previa de empleados y datos vinculados que se borrarían."""
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        company = db.execute(
+            text("SELECT id, name FROM companies WHERE id = :id"),
+            {"id": company_id},
+        ).mappings().first()
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        roots, employee_ids, _owner_id = company_deletion_roots(db, company_id)
+        employees = db.execute(
+            text("SELECT id, first_name, last_name FROM patients WHERE company_id = :company_id ORDER BY last_name, first_name"),
+            {"company_id": company_id},
+        ).mappings().all()
+        return {
+            "company_id": company_id,
+            "company_name": company["name"],
+            "employees": [
+                {"id": row["id"], "name": " ".join(part for part in (row["first_name"], row["last_name"]) if part) or "Empleado"}
+                for row in employees
+            ],
+            "employee_count": len(employee_ids),
+            "related_data": summarize_related_records(db, roots),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Could not prepare deletion summary: " + str(e))
+    finally:
+        db.close()
+
+
+@router.delete("/{company_id}", tags=["Companies"])
+async def delete_company(
+    company_id: str,
+    confirmed: bool = Query(False),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Elimina empresa, empleados, cuentas y todos sus datos relacionados."""
+    if not confirmed:
+        raise HTTPException(status_code=400, detail="Confirm deletion of the company and all related data")
+
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        roots, employee_ids, owner_user_id = company_deletion_roots(db, company_id)
+        if not roots:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        # Delete users belonging to employees as additional roots. The company FK
+        # points to patient rows, while employee accounts are the referenced rows.
+        files = delete_related_records(db, roots)
+        db.commit()
+        remove_related_files(files)
+        return {
+            "detail": "Company and all related data deleted successfully",
+            "company_id": company_id,
+            "deleted_employee_count": len(employee_ids),
+            "deleted_owner_user_id": owner_user_id,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error deleting company and related data: " + str(e))
+    finally:
+        db.close()
+
+
+@router.get("/{company_id}/employees/{patient_id}/deletion-summary", tags=["Companies"])
+async def get_employee_deletion_summary(
+    company_id: str,
+    patient_id: str,
+    current_user: User = Depends(require_roles("admin")),
+):
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        patient = db.execute(
+            text("SELECT id, user_id, first_name, last_name FROM patients WHERE id = :pid AND company_id = :cid"),
+            {"pid": patient_id, "cid": company_id},
+        ).mappings().first()
+        if not patient:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        roots = [("patients", patient_id)]
+        if patient["user_id"]:
+            roots.append(("users", str(patient["user_id"])))
+        return {
+            "patient_id": patient_id,
+            "patient_name": " ".join(part for part in (patient["first_name"], patient["last_name"]) if part) or "Empleado",
+            "related_data": summarize_related_records(db, roots),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Could not prepare deletion summary: " + str(e))
+    finally:
+        db.close()
+
 
 @router.delete("/{company_id}/employees/{patient_id}", tags=["Companies"])
 async def delete_employee(
     company_id: str,
     patient_id: str,
-    current_user: User = Depends(require_active_user)
+    confirmed: bool = Query(False),
+    current_user: User = Depends(require_roles("admin")),
 ):
-    """Eliminar paciente (employee) (admin y company owner)"""
+    """Eliminación de empleado reservada a administradores y con confirmación."""
+    if not confirmed:
+        raise HTTPException(status_code=400, detail="Confirm deletion of the employee and all related data")
+
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
-    
     try:
-        company = db.execute(text("""
-            SELECT id, owner_user_id FROM companies WHERE id = :id
-        """), {"id": company_id}).mappings().first()
-        
-        if not company:
-            raise HTTPException(status_code=404, detail="Company not found")
-        
-        if current_user.role not in ("admin", "company", "secretary"):
-            raise HTTPException(status_code=403, detail="Only admin, secretary or company owners can delete employees")
-        
-        if current_user.role == "company" and company["owner_user_id"] != current_user.id:
-            raise HTTPException(status_code=403, detail="You can only delete employees for your own company")
-        
-        patient_row = db.execute(
-            text("SELECT user_id FROM patients WHERE id = :id"),
-            {"id": patient_id}
+        patient = db.execute(
+            text("SELECT id, user_id FROM patients WHERE id = :pid AND company_id = :cid"),
+            {"pid": patient_id, "cid": company_id},
         ).mappings().first()
-
-        if not patient_row:
+        if not patient:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-        linked_user_id = patient_row["user_id"]
-
-        medical_records = db.execute(
-            text("SELECT id FROM medical_record WHERE patient_id = :pid"),
-            {"pid": patient_id}
-        ).mappings().all()
-
-        for mr in medical_records:
-            mr_id = mr["id"]
-            study_ids = db.execute(
-                text("SELECT id FROM studies WHERE medical_record_id = :mrid"),
-                {"mrid": mr_id}
-            ).mappings().all()
-            for s in study_ids:
-                db.execute(text("DELETE FROM study_files WHERE study_id = :sid"), {"sid": s["id"]})
-            db.execute(text("DELETE FROM studies WHERE medical_record_id = :mrid"), {"mrid": mr_id})
-            db.execute(text("DELETE FROM medical_record WHERE id = :mrid"), {"mrid": mr_id})
-
-        db.execute(text("DELETE FROM patients WHERE id = :id"), {"id": patient_id})
-
-        if linked_user_id:
-            db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": linked_user_id})
-
+        roots = [("patients", patient_id)]
+        if patient["user_id"]:
+            roots.append(("users", str(patient["user_id"])))
+        files = delete_related_records(db, roots)
         db.commit()
-        
-        return {
-            "detail": "Employee deleted successfully",
-            "patient_id": patient_id,
-            "company_id": company_id,
-        }
+        remove_related_files(files)
+        return {"detail": "Employee and all related data deleted successfully", "patient_id": patient_id}
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error deleting employee")
+        raise HTTPException(status_code=500, detail="Error deleting employee and related data: " + str(e))
     finally:
         db.close()
