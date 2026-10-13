@@ -1,5 +1,7 @@
 """Helpers for previewing and removing a user's related database records."""
 
+import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -148,6 +150,13 @@ def summarize_related_records(db, roots: list[tuple[str, str]]) -> list[dict[str
     ]
 
 
+def deletion_confirmation_token(db, roots: list[tuple[str, str]]) -> str:
+    """Bind approval to the exact related rows shown in the preview."""
+    summary = summarize_related_records(db, roots)
+    payload = json.dumps({"roots": sorted(roots), "related_data": summary}, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _remove_files(files: list[tuple[Path, str]]) -> None:
     for directory, value in files:
         try:
@@ -180,6 +189,7 @@ def company_deletion_roots(db, company_id: str) -> tuple[list[tuple[str, str]], 
     ).mappings().all()
     owner_user_id = company.get("owner_user_id")
     roots = [("companies", company_id)]
+    roots.extend(("patients", str(row["id"])) for row in employees)
     roots.extend(("users", str(row["user_id"])) for row in employees if row.get("user_id"))
     if owner_user_id:
         roots.append(("users", str(owner_user_id)))
@@ -203,5 +213,6 @@ def user_deletion_roots(db, user_id: str) -> tuple[list[tuple[str, str]], list[s
         ).mappings().all()
         employees = [str(row["user_id"]) for row in employee_rows if row.get("user_id")]
         roots.insert(0, ("companies", str(company["id"])))
+        roots.extend(("patients", str(row["id"])) for row in employee_rows)
         roots.extend(("users", employee_id) for employee_id in employees)
     return roots, employees
