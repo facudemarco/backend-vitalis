@@ -450,8 +450,9 @@ async def update_company_profile(
     responsable_name: str = Form(default=""),
     cuit: str = Form(default=""),
     phone: str = Form(default=""),
+    email: Optional[str] = Form(default=None),
     address: str = Form(default=""),
-    current_user: User = Depends(require_roles("admin"))
+    current_user: User = Depends(require_roles("admin", "secretary"))
 ):
     """Actualiza la informacion en la tabla companies usando el owner_user_id"""
     db = getConnectionForLogin()
@@ -459,6 +460,23 @@ async def update_company_profile(
         raise HTTPException(status_code=500, detail="Database connection error")
         
     try:
+        if email is not None and email.strip():
+            normalized_email = email.strip().lower()
+            duplicate = db.query(User).filter(
+                User.email == normalized_email,
+                User.id != user_id,
+            ).first()
+            if duplicate:
+                raise HTTPException(status_code=409, detail="Email is already in use")
+            db.query(User).filter(User.id == user_id).update(
+                {User.email: normalized_email},
+                synchronize_session=False,
+            )
+            db.execute(
+                text("UPDATE companies SET email = :email WHERE owner_user_id = :uid"),
+                {"email": normalized_email, "uid": user_id},
+            )
+
         db.execute(text("""
             UPDATE companies
             SET name = :name, responsable_name = :responsable_name, cuit = :cuit,
@@ -472,6 +490,10 @@ async def update_company_profile(
             "address": address,
             "uid": user_id
         })
+        db.execute(
+            text("UPDATE users SET phone = :phone WHERE id = :uid"),
+            {"phone": phone, "uid": user_id},
+        )
         db.commit()
         return {"detail": "Company profile updated successfully", "user_id": user_id}
     except Exception as e:
