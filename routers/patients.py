@@ -26,6 +26,8 @@ def _format_patient(row) -> dict:
         "company_id": row["company_id"],
         "user_id": row["user_id"],
         "study_type": row["study_type"],
+        "company_name": row.get("company_name"),
+        "is_active": row.get("is_active"),
     }
 
 # ==================== GET PATIENTS ====================
@@ -113,7 +115,12 @@ async def getPatients(current_user: User = Depends(require_active_user)):
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
     try:
-        rows = db.execute(text("SELECT * FROM patients")).mappings().all()
+        rows = db.execute(text("""
+            SELECT patients.*, companies.name AS company_name, users.is_active
+            FROM patients
+            LEFT JOIN companies ON companies.id = patients.company_id
+            LEFT JOIN users ON users.id = patients.user_id
+        """)).mappings().all()
         return [_format_patient(row) for row in rows]
     except HTTPException:
         raise
@@ -251,6 +258,20 @@ async def update_patient(
             text(f"UPDATE patients SET {set_clause} WHERE id = :patient_id"),
             updates
         )
+
+        user_fields = {
+            field: updates[field]
+            for field in ("first_name", "last_name", "dni", "date_of_birth", "phone")
+            if field in updates
+        }
+        if user_fields and row["user_id"]:
+            user_set_clause = ", ".join(f"{field} = :{field}" for field in user_fields)
+            user_fields["user_id"] = row["user_id"]
+            db.execute(
+                text(f"UPDATE users SET {user_set_clause} WHERE id = :user_id"),
+                user_fields,
+            )
+
         db.commit()
 
         updated = db.execute(
