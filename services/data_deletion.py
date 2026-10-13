@@ -161,8 +161,12 @@ def _remove_files(files: list[tuple[Path, str]]) -> None:
             pass
 
 
-def delete_related_records(db, roots: list[tuple[str, str]]) -> None:
+def delete_related_records(db, roots: list[tuple[str, str]]) -> list[tuple[Path, str]]:
     _counts, files = _walk_roots(db, roots, delete=True)
+    return files
+
+
+def remove_related_files(files: list[tuple[Path, str]]) -> None:
     _remove_files(files)
 
 
@@ -178,7 +182,7 @@ def company_deletion_roots(db, company_id: str) -> tuple[list[tuple[str, str]], 
     roots = [("companies", company_id)]
     roots.extend(("users", str(row["user_id"])) for row in employees if row.get("user_id"))
     if owner_user_id:
-        roots.append(("users", str(owner_user_id))
+        roots.append(("users", str(owner_user_id)))
     return roots, [str(row["id"]) for row in employees], str(owner_user_id) if owner_user_id else None
 
 
