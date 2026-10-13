@@ -804,10 +804,24 @@ async def get_user_deletion_summary(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         roots, _employee_user_ids = user_deletion_roots(db, user_id)
+        company = db.execute(
+            text("SELECT id, name FROM companies WHERE owner_user_id = :user_id"),
+            {"user_id": user_id},
+        ).mappings().first() if user.role == "company" else None
+        employees = db.execute(
+            text("SELECT id, first_name, last_name FROM patients WHERE company_id = :company_id ORDER BY last_name, first_name"),
+            {"company_id": company["id"]},
+        ).mappings().all() if company else []
         return {
             "user_id": user_id,
             "email": user.email,
             "role": user.role,
+            "company_name": company["name"] if company else None,
+            "employee_count": len(employees) if company else None,
+            "employees": [
+                {"id": row["id"], "name": " ".join(part for part in (row["first_name"], row["last_name"]) if part) or "Empleado"}
+                for row in employees
+            ],
             "related_data": summarize_related_records(db, roots),
             "confirmation_token": deletion_confirmation_token(db, roots),
         }
