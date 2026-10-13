@@ -5,7 +5,7 @@ from auth.authentication import require_roles, require_active_user
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
 from Database.users import hash_password
-from services.data_deletion import delete_related_records, remove_related_files, summarize_related_records, user_deletion_roots
+from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records, user_deletion_roots
 
 router = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
 
@@ -809,6 +809,7 @@ async def get_user_deletion_summary(
             "email": user.email,
             "role": user.role,
             "related_data": summarize_related_records(db, roots),
+            "confirmation_token": deletion_confirmation_token(db, roots),
         }
     except HTTPException:
         raise
@@ -822,10 +823,11 @@ async def get_user_deletion_summary(
 async def delete_user(
     user_id: str,
     confirmed: bool = Query(False),
+    confirmation_token: str = Query(""),
     current_user: User = Depends(require_roles("admin")),
 ):
     """Elimina la cuenta y todos sus datos relacionados tras confirmación explícita."""
-    if not confirmed:
+    if not confirmed or not confirmation_token:
         raise HTTPException(status_code=400, detail="Confirm deletion of this user and all related data")
 
     db = getConnectionForLogin()
@@ -836,6 +838,8 @@ async def delete_user(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         roots, employee_user_ids = user_deletion_roots(db, user_id)
+        if deletion_confirmation_token(db, roots) != confirmation_token:
+            raise HTTPException(status_code=409, detail="Related data changed; retrieve a new deletion summary")
         files = delete_related_records(db, roots)
         db.commit()
         remove_related_files(files)
