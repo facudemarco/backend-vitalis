@@ -4,6 +4,7 @@ from models.user import User
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
+from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records
 import os
 from pathlib import Path
 import shutil
@@ -292,7 +293,6 @@ async def update_patient(
 
 # ==================== DELETE PATIENT ====================
 
-from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records
 
 
 @router.get("/{patient_id}/deletion-summary", tags=["Patients"])
