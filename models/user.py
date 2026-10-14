@@ -19,6 +19,7 @@ class Patients(Base):
     social_security = Column(String(50))
     company_id = Column(CHAR(36))
     user_id = Column(CHAR(36))
+    patient_status = Column(String(20), nullable=False, default="En proceso")
     
     class Config:
         from_attributes = True
