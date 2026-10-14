@@ -29,6 +29,7 @@ def _format_patient(row) -> dict:
         "study_type": row["study_type"],
         "company_name": row.get("company_name"),
         "is_active": row.get("is_active"),
+        "patient_status": row.get("patient_status"),
     }
 
 # ==================== GET PATIENTS ====================
@@ -51,7 +52,7 @@ async def get_patients(
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type FROM patients WHERE 1=1")
+        query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status FROM patients WHERE 1=1")
         params = {}
         
         # Filtrar según rol
@@ -80,7 +81,7 @@ async def get_patients(
             company_row = db.execute(text("SELECT id FROM companies WHERE owner_user_id = :user_id"), {"user_id": current_user.id}).mappings().first()
             if company_row:
                 params["company_id"] = company_row["id"]
-                query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type FROM patients WHERE company_id = :company_id")
+                query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status FROM patients WHERE company_id = :company_id")
         
         elif current_user.role == "professional":
             # Professional ve todos, puede filtrar por DNI
@@ -129,6 +130,51 @@ async def getPatients(current_user: User = Depends(require_active_user)):
         raise HTTPException(status_code=500, detail="Error fetching patients" + str(e))
     finally:
         db.close()
+
+@router.patch("/{patient_id}/status", tags=["Patients"])
+async def update_patient_status(
+    patient_id: str,
+    patient_status: str = Body(..., embed=True),
+    current_user: User = Depends(require_roles("admin", "secretary")),
+):
+    """Actualiza el estado operativo de un paciente (solo admin y secretaría)."""
+    allowed_statuses = {"Completado", "En proceso"}
+    if patient_status not in allowed_statuses:
+        raise HTTPException(
+            status_code=422,
+            detail="El estado debe ser 'Completado' o 'En proceso'",
+        )
+
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        patient = db.execute(
+            text("SELECT id FROM patients WHERE id = :patient_id"),
+            {"patient_id": patient_id},
+        ).mappings().first()
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        db.execute(
+            text("UPDATE patients SET patient_status = :patient_status WHERE id = :patient_id"),
+            {"patient_status": patient_status, "patient_id": patient_id},
+        )
+        db.commit()
+        return {
+            "detail": "Estado del paciente actualizado",
+            "patient_id": patient_id,
+            "patient_status": patient_status,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error updating patient status: " + str(e))
+    finally:
+        db.close()
+
 
 @router.get("/{patient_id}", tags=["Patients"])
 async def get_patient_by_id(patient_id: str, current_user: User = Depends(require_active_user)):
@@ -276,7 +322,7 @@ async def update_patient(
         db.commit()
 
         updated = db.execute(
-            text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type FROM patients WHERE id = :id"),
+            text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status FROM patients WHERE id = :id"),
             {"id": patient_id}
         ).mappings().first()
 
