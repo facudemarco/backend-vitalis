@@ -23,7 +23,7 @@ def sendEmail(form_data: FormData):
     if not sender_password:
         raise HTTPException(status_code=500, detail="La contraseña del remitente no está configurada")
         
-    receiver_email = "logistica@saludvitalis.org"
+    receiver_email = "vitaliscentrosalud@gmail.com"
     subject = f"{form_data.name} - Contacto desde la web Vitalis"
     body = f"Nombre completo: {form_data.name}\nEmail: {form_data.email}\nConsulta: {form_data.note}"
 
