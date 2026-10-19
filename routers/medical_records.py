@@ -15,6 +15,7 @@ from models.medical_record import (
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
+from services.patient_access import require_patient_access
 from datetime import datetime
 from typing import List, Optional, Annotated, Any, Dict
 from pydantic import Json, ValidationError, BeforeValidator
@@ -537,6 +538,7 @@ async def get_medical_records_by_patient(
         
     try:
 
+        require_patient_access(db, current_user, patient_id)
         # Get all parent records
         records = db.execute(
             text("SELECT id, patient_id FROM medical_record WHERE patient_id = :pid"),

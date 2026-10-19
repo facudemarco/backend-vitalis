@@ -4,6 +4,7 @@ from models.user import User
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
+from services.patient_access import require_patient_access, studies_are_ready
 from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records
 import os
 from pathlib import Path
@@ -29,7 +30,10 @@ def _format_patient(row) -> dict:
         "study_type": row["study_type"],
         "company_name": row.get("company_name"),
         "is_active": row.get("is_active"),
-        "patient_status": row.get("patient_status"),
+        "patient_status": (
+            "Completado" if row.get("patient_status") == "Completado"
+            else "En proceso"
+        ),
     }
 
 # ==================== GET PATIENTS ====================
@@ -69,19 +73,19 @@ async def get_patients(
                 params["dni"] = f"%{dni}%"
         
         elif current_user.role == "company":
-            # Company owner solo ve sus empleados
-            query = text(query.text + " AND company_id = :company_id")
-            params["company_id"] = current_user.id  # Obtener company_id del owner
-            
-            # Validar que si pasa company_id, sea el suyo
-            if company_id and company_id != current_user.id:
-                raise HTTPException(status_code=403, detail="You can only view your own company patients")
-            
-            # Obtener el company_id real del owner
             company_row = db.execute(text("SELECT id FROM companies WHERE owner_user_id = :user_id"), {"user_id": current_user.id}).mappings().first()
-            if company_row:
-                params["company_id"] = company_row["id"]
-                query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status FROM patients WHERE company_id = :company_id")
+            if not company_row:
+                return {"patients": [], "total": 0}
+            if company_id and company_id != company_row["id"]:
+                raise HTTPException(status_code=403, detail="You can only view your own company patients")
+            params["company_id"] = company_row["id"]
+            query = text(query.text + " AND company_id = :company_id AND patient_status = 'Completado'")
+            if dni:
+                query = text(query.text + " AND dni LIKE :dni")
+                params["dni"] = f"%{dni}%"
+            if user_id:
+                query = text(query.text + " AND user_id = :user_id")
+                params["user_id"] = user_id
         
         elif current_user.role == "professional":
             # Professional ve todos, puede filtrar por DNI
@@ -117,12 +121,22 @@ async def getPatients(current_user: User = Depends(require_active_user)):
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
     try:
-        rows = db.execute(text("""
+        query = """
             SELECT patients.*, companies.name AS company_name, users.is_active
             FROM patients
             LEFT JOIN companies ON companies.id = patients.company_id
             LEFT JOIN users ON users.id = patients.user_id
-        """)).mappings().all()
+        """
+        params = {}
+        if current_user.role == "company":
+            query += " WHERE companies.owner_user_id = :uid AND patients.patient_status = 'Completado'"
+            params["uid"] = current_user.id
+        elif current_user.role == "patient":
+            query += " WHERE patients.user_id = :uid"
+            params["uid"] = current_user.id
+        elif current_user.role not in ("admin", "secretary", "professional"):
+            raise HTTPException(status_code=403, detail="Access denied")
+        rows = db.execute(text(query), params).mappings().all()
         return [_format_patient(row) for row in rows]
     except HTTPException:
         raise
@@ -150,11 +164,17 @@ async def update_patient_status(
         raise HTTPException(status_code=500, detail="Database connection error")
     try:
         patient = db.execute(
-            text("SELECT id FROM patients WHERE id = :patient_id"),
+            text("SELECT id FROM patients WHERE id = :patient_id FOR UPDATE"),
             {"patient_id": patient_id},
         ).mappings().first()
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
+
+        if patient_status == "Completado" and current_user.role != "admin" and not studies_are_ready(db, patient_id):
+            raise HTTPException(
+                status_code=409,
+                detail="No se puede completar: faltan estudios, archivos o informes obligatorios, o hay estudios pendientes. Contactá a un administrador para autorizar la excepción.",
+            )
 
         db.execute(
             text("UPDATE patients SET patient_status = :patient_status WHERE id = :patient_id"),
@@ -190,8 +210,9 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
+        require_patient_access(db, current_user, patient_id)
         row = db.execute(text("""
-            SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type
+            SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status
             FROM patients
             WHERE id = :id
         """), {"id": patient_id}).mappings().first()
