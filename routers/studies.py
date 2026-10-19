@@ -775,7 +775,12 @@ async def get_study_categories():
             text("SELECT id, name, url_image, requires_report FROM studies_admin")
         ).mappings().all()
         
-        return {"studies_categories": [dict(row) for row in result]}
+        return {
+            "studies_categories": [
+                {**dict(row), "requires_report": bool(row["requires_report"])}
+                for row in result
+            ]
+        }
     
     except HTTPException:
         raise
