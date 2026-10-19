@@ -2,6 +2,7 @@ from os import name
 from Database.getConnection import engine
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from models.user import User
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
@@ -13,6 +14,7 @@ from typing import Optional
 import shutil
 import mimetypes
 from typing import List
+from services.patient_access import require_patient_access
 
 router = APIRouter(prefix="/studies")
 
@@ -71,15 +73,7 @@ def _format_study(row) -> dict:
     }
 
 def _check_access_to_patient(current_user: User, patient_id: str, db):
-    patient = db.execute(
-        text("SELECT id, company_id, user_id FROM patients WHERE id = :pid"),
-        {"pid": patient_id}
-    ).mappings().first()
-    
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    
-    return patient
+    return require_patient_access(db, current_user, patient_id)
 
 @router.post("/patient/{patient_id}", tags=["Studies"])
 async def create_study(
@@ -275,12 +269,13 @@ async def create_study(
         db.close()
 
 @router.get("/patient/{patient_id}", tags=["Studies"])
-async def get_studies(patient_id: str):
+async def get_studies(patient_id: str, current_user: User = Depends(require_active_user)):
     db = getConnectionForLogin()
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
+        _check_access_to_patient(current_user, patient_id, db)
         rows = db.execute(
             text("""
                 SELECT
@@ -436,6 +431,8 @@ async def get_study_file_link(
         if not row:
             raise HTTPException(status_code=404, detail="Study not found")
 
+        _check_access_to_patient(current_user, row["patient_id"], db)
+
         # ✅ permisos (si es paciente)
         if current_user.role == "patient":
             user_patient_id = db.execute(
@@ -455,6 +452,39 @@ async def get_study_file_link(
             "mime_type": row["mime_type"],
         }
 
+    finally:
+        db.close()
+
+
+@router.get("/files/public/{filename}", tags=["Studies"])
+async def download_study_file(filename: str, current_user: User = Depends(require_active_user)):
+    """Keep existing file URLs while checking publication and ownership."""
+    if Path(filename).name != filename or "\\" in filename:
+        raise HTTPException(status_code=404, detail="File not found")
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection error")
+    try:
+        file = db.execute(
+            text("""
+                SELECT s.patient_id, sf.file_path, sf.original_filename, sf.mime_type
+                FROM study_files sf JOIN studies s ON s.id = sf.study_id
+                WHERE sf.file_path = :file_url
+            """),
+            {"file_url": f"{DOMAIN_URL}/{filename}"},
+        ).mappings().first()
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        _check_access_to_patient(current_user, file["patient_id"], db)
+        path = Path(STUDIES_DIR) / filename
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(
+            path, media_type=file["mime_type"] or "application/octet-stream",
+            filename=file["original_filename"] or filename,
+            content_disposition_type="inline",
+            headers={"Cache-Control": "private, no-store"},
+        )
     finally:
         db.close()
 
