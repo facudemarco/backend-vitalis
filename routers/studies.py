@@ -88,11 +88,14 @@ async def create_study(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
-        consent_study = study_type.strip().casefold() == "consentimiento informado"
+        normalized_study_type = study_type.strip().casefold()
+        consent_study = normalized_study_type == "consentimiento informado"
+        height_questionnaire_study = normalized_study_type == "cuestionario para trabajadores en altura, conducción de vehículos y trabajos en espacios confinados"
+        special_pdf_study = consent_study or height_questionnaire_study
         study_files = study_files or []
 
         consent_id_to_complete = None
-        if consent_study:
+        if special_pdf_study:
             if current_user.role not in ("admin", "professional"):
                 raise HTTPException(
                     status_code=403,
@@ -101,14 +104,14 @@ async def create_study(
             if len(study_files) != 1:
                 raise HTTPException(
                     status_code=422,
-                    detail="El consentimiento informado requiere exactamente un archivo PDF"
+                    detail="Este estudio requiere exactamente un archivo PDF"
                 )
 
             consent_file = study_files[0]
             if Path(consent_file.filename or "").suffix.lower() != ".pdf":
                 raise HTTPException(
                     status_code=422,
-                    detail="El consentimiento informado debe adjuntarse en formato PDF"
+                    detail="Este estudio debe adjuntarse en formato PDF"
                 )
 
             pdf_header = await consent_file.read(5)
@@ -132,17 +135,17 @@ async def create_study(
                     SELECT id
                     FROM studies
                     WHERE patient_id = :patient_id
-                      AND LOWER(TRIM(study_type)) = 'consentimiento informado'
+                      AND LOWER(TRIM(study_type)) = :study_type
                     ORDER BY created_at ASC
                     FOR UPDATE
                 """),
-                {"patient_id": patient_id}
+                {"patient_id": patient_id, "study_type": normalized_study_type}
             ).mappings().all()
 
             if len(existing_consents) > 1:
                 raise HTTPException(
                     status_code=409,
-                    detail="Este paciente tiene registros duplicados de consentimiento informado. Eliminá los duplicados antes de adjuntar el PDF."
+                    detail="Este paciente tiene registros duplicados de este estudio. Eliminá los duplicados antes de adjuntar el PDF."
                 )
             if existing_consents:
                 existing_consent_id = existing_consents[0]["id"]
@@ -153,7 +156,7 @@ async def create_study(
                 if existing_file:
                     raise HTTPException(
                         status_code=409,
-                        detail="Este paciente ya tiene un consentimiento informado con PDF registrado"
+                        detail="Este paciente ya tiene este estudio con PDF registrado"
                     )
                 # Complete a legacy consent row created before PDF upload was required.
                 consent_id_to_complete = existing_consent_id
@@ -163,7 +166,7 @@ async def create_study(
             raise HTTPException(status_code=422, detail="Debe adjuntar el archivo del estudio")
 
         # Check professional's role
-        if not consent_study and current_user.role == "professional":
+        if not special_pdf_study and current_user.role == "professional":
             prof_row = db.execute(
                 text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
                 {"uid": current_user.id}
