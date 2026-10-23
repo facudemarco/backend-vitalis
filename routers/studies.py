@@ -217,7 +217,7 @@ async def create_study(
                 os.makedirs(STUDIES_DIR, exist_ok=True)
             
             # Normalize filename and ensure uniqueness
-            ext = ".pdf" if consent_study else get_file_extension(file)
+            ext = ".pdf" if special_pdf_study else get_file_extension(file)
             fname = f"{uuid.uuid4()}{ext}"
             path = os.path.join(STUDIES_DIR, fname)
             
@@ -242,7 +242,7 @@ async def create_study(
                     "study_id": study_id,
                     "file_path": url_main,
                     "original_filename": file.filename,
-                    "mime_type": "application/pdf" if consent_study else file.content_type,
+                    "mime_type": "application/pdf" if special_pdf_study else file.content_type,
                     "size_bytes": size_bytes,
                     "uploaded_at": now,
                     "is_report": False
