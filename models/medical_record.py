@@ -155,6 +155,7 @@ class MedicalRecordHeadExam(BaseModel):
     tumoraciones_tiroideas: Optional[bool] = None
     adenopatias: Optional[bool] = None
     observations: Optional[str] = None
+    mallampati: Optional[str] = None
 
 class MedicalRecordImmunizations(BaseModel):
     id: Optional[str] = None
