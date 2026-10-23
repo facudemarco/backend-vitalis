@@ -10,7 +10,7 @@ from models.medical_record import (
     MedicalRecordOftalmologicoExam, MedicalRecordOrlExam, MedicalRecordOsteoarticularExam,
     MedicalRecordPersonalHistory, MedicalRecordPreviousProblems, MedicalRecordPsychiatricClinicalExam,
     MedicalRecordRecomendations, MedicalRecordRespiratorioExam, MedicalRecordSignatures,
-    MedicalRecordSkinExam, MedicalRecordStudies, MedicalRecordSurgerys, MedicalRecordLaboralSignatures, MedicalRecordCuestionarioRiesgos, MedicalRecordDdjj, MedicalRecordNeuroMedicalExam
+    MedicalRecordSkinExam, MedicalRecordStudies, MedicalRecordSurgerys, MedicalRecordLaboralSignatures, MedicalRecordCuestionarioRiesgos, MedicalRecordDdjj, MedicalRecordNeuroMedicalExam, MedicalRecordOphthalmology
 )
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
@@ -557,7 +557,7 @@ async def get_medical_records_by_patient(
             "medical_record_oftalmologico_exam", "medical_record_orl_exam", "medical_record_osteoarticular_exam",
             "medical_record_personal_history", "medical_record_previous_problems", "medical_record_psychiatric_clinical_exam",
             "medical_record_recomendations", "medical_record_respiratorio_exam", "medical_record_signatures",
-            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures", "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_oftalmologico_medical_exam", "medical_record_patient_signatures", "medical_record_medical_responsable_signatures"
+            "medical_record_skin_exam", "medical_record_studies", "medical_record_surgerys", "medical_record_laboral_signatures", "medical_record_cuestionario_riesgos", "medical_record_ddjj", "medical_record_neuro_medical_exam", "medical_record_oftalmologico_medical_exam", "medical_record_ophthalmology", "medical_record_patient_signatures", "medical_record_medical_responsable_signatures"
         ]
         
         for rec in records:
