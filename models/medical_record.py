@@ -28,6 +28,7 @@ class MedicalRecordCardiovascularExam(BaseModel):
     pulsos_perifericos_ausentes: Optional[bool] = None
     varices: Optional[bool] = None
     observations: Optional[str] = None
+    hta: Optional[bool] = None
 
 class MedicalRecordClinicalExam(BaseModel):
     id: Optional[str] = None
@@ -43,6 +44,7 @@ class MedicalRecordData(BaseModel):
     id: Optional[str] = None
     medical_record_id: Optional[str] = None
     complete_name: Optional[str] = None
+    company_name: Optional[str] = None
     dni: Optional[int] = None
     address: Optional[str] = None
     date_of_birthday: Optional[str] = None
@@ -84,6 +86,7 @@ class MedicalRecordEvaluationType(BaseModel):
     periodic_exams: Optional[bool] = None
     laboral_change_position: Optional[bool] = None
     sport_physical_aptitude: Optional[bool] = None
+    examen_psicofisico: Optional[bool] = None
     other_boolean: Optional[bool] = None
     other: Optional[str] = None
 
@@ -133,7 +136,7 @@ class MedicalRecordHabits(BaseModel):
     smoke: Optional[bool] = None
     smoke_quantity: Optional[int] = None
     alcoholic_drinks: Optional[bool] = None
-    alcoholic_drinks_quantity: Optional[int] = None
+    alcoholic_drinks_quantity: Optional[str] = None
     drugs: Optional[bool] = None
     drugs_type: Optional[str] = None
     sleep_alteration: Optional[bool] = None
@@ -163,6 +166,8 @@ class MedicalRecordImmunizations(BaseModel):
     hepatitis_a: Optional[bool] = None
     hepatitis_b: Optional[bool] = None
     dengue: Optional[bool] = None
+    fiebre_amarilla: Optional[bool] = None
+    meningitis: Optional[bool] = None
     
 
 class MedicalRecordLaboralContacts(BaseModel):
@@ -206,6 +211,54 @@ class MedicalRecordNeuroClinicalExam(BaseModel):
     apraxia: Optional[bool] = None
     ataxia: Optional[bool] = None
     observations: Optional[str] = None
+    stop_bang_snoring: Optional[bool] = None
+    stop_bang_tiredness: Optional[bool] = None
+    stop_bang_observed_apnea: Optional[bool] = None
+    stop_bang_hypertension: Optional[bool] = None
+    stop_bang_bmi_over_35: Optional[bool] = None
+    stop_bang_age_over_50: Optional[bool] = None
+    stop_bang_neck_circumference: Optional[bool] = None
+    stop_bang_male: Optional[bool] = None
+    sleep_disorder_snoring: Optional[bool] = None
+    sleep_disorder_smoking: Optional[bool] = None
+    sleep_disorder_hta: Optional[bool] = None
+    sleep_disorder_obesity: Optional[bool] = None
+    sleep_disorder_short_neck: Optional[bool] = None
+    sleep_disorder_mallampati_3_4: Optional[bool] = None
+    sleep_disorder_stop_bang: Optional[bool] = None
+
+class MedicalRecordOphthalmology(BaseModel):
+    id: Optional[str] = None
+    medical_record_id: Optional[str] = None
+    consulted_ophthalmologist: Optional[bool] = None
+    vision_disease: Optional[bool] = None
+    vision_treatment: Optional[bool] = None
+    vision_surgery: Optional[bool] = None
+    vision_surgery_details: Optional[str] = None
+    glasses_or_contacts: Optional[bool] = None
+    medications: Optional[bool] = None
+    medications_details: Optional[str] = None
+    monocular_vision: Optional[bool] = None
+    anisometropia: Optional[bool] = None
+    night_vision: Optional[str] = None
+    twilight_vision: Optional[str] = None
+    glare_readaptation: Optional[str] = None
+    ocular_movement_extrinsic: Optional[bool] = None
+    ocular_movement_intrinsic: Optional[bool] = None
+    visual_field_od: Optional[str] = None
+    visual_field_oi: Optional[str] = None
+    bmc_conjunctivas: Optional[str] = None
+    bmc_cornea: Optional[str] = None
+    bmc_lens: Optional[str] = None
+    ocular_tension_od: Optional[str] = None
+    ocular_tension_oi: Optional[str] = None
+    fundus_od: Optional[str] = None
+    fundus_oi: Optional[str] = None
+    fundus_dilation: Optional[bool] = None
+    ishihara: Optional[str] = None
+    trcs: Optional[str] = None
+    farnsworth: Optional[str] = None
+    head_neck: Optional[str] = None
 
 class MedicalRecordOftalmologicoExam(BaseModel):
     id: Optional[str] = None
@@ -262,6 +315,10 @@ class MedicalRecordPersonalHistory(BaseModel):
     covid: Optional[bool] = None
     fha: Optional[bool] = None
     dengue: Optional[bool] = None
+    medications: Optional[bool] = None
+    medications_details: Optional[str] = None
+    malformations: Optional[bool] = None
+    malformations_details: Optional[str] = None
 
 class MedicalRecordPreviousProblems(BaseModel):
     id: Optional[str] = None
@@ -324,6 +381,7 @@ class MedicalRecordRecomendations(BaseModel):
     apto_preexistencia_condiciona: Optional[bool] = None
     no_apto_definitivo: Optional[bool] = None
     no_apto_temporal: Optional[bool] = None
+    retenido: Optional[bool] = None
     duracion: Optional[str] = None
     observations: Optional[str] = None
 
@@ -504,6 +562,7 @@ class MedicalRecordFullRequest(BaseModel):
     medical_record_laboral_exam: Optional[MedicalRecordLaboralExam] = Field(None, description="**Medical Record Laboral Exam**")
     medical_record_laboral_history: Optional[MedicalRecordLaboralHistory] = Field(None, description="**Medical Record Laboral History**")
     medical_record_neuro_clinical_exam: Optional[MedicalRecordNeuroClinicalExam] = Field(None, description="**Medical Record Neuro Clinical Exam**")
+    medical_record_ophthalmology: Optional[MedicalRecordOphthalmology] = Field(None, description="**Medical Record Ophthalmology**")
     medical_record_oftalmologico_exam: Optional[MedicalRecordOftalmologicoExam] = Field(None, description="**Medical Record Oftalmologico Exam**")
     medical_record_orl_exam: Optional[MedicalRecordOrlExam] = Field(None, description="**Medical Record Orl Exam**")
     medical_record_osteoarticular_exam: Optional[MedicalRecordOsteoarticularExam] = Field(None, description="**Medical Record Osteoarticular Exam**")
