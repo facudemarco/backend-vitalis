@@ -83,6 +83,12 @@ class PatientPublicationTests(unittest.TestCase):
                 self.assertEqual(self.client.get(path).status_code, 200)
         self.assertEqual(self.client.get("/patients/other").status_code, 404)
 
+    def test_patient_detail_includes_associated_company_name(self):
+        self.user.role = "professional"
+        response = self.client.get("/patients/patient")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["company_name"], "Empresa")
+
     def test_completion_is_only_available_to_admin_and_secretary(self):
         for role in ("company", "professional", "patient"):
             self.user.role = role
