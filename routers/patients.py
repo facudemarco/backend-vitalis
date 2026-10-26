@@ -212,9 +212,12 @@ async def get_patient_by_id(patient_id: str, current_user: User = Depends(requir
     try:
         require_patient_access(db, current_user, patient_id)
         row = db.execute(text("""
-            SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status
-            FROM patients
-            WHERE id = :id
+            SELECT p.id, p.first_name, p.last_name, p.dni, p.date_of_birth, p.phone,
+                   p.address, p.social_security, p.company_id, p.user_id, p.study_type,
+                   p.patient_status, c.name AS company_name
+            FROM patients p
+            LEFT JOIN companies c ON c.id = p.company_id
+            WHERE p.id = :id
         """), {"id": patient_id}).mappings().first()
         
         if not row:
