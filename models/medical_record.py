@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 import json
 from datetime import datetime
 
@@ -45,6 +45,8 @@ class MedicalRecordData(BaseModel):
     medical_record_id: Optional[str] = None
     complete_name: Optional[str] = None
     company_name: Optional[str] = None
+    education_level: Optional[Literal["Primarios", "Secundarios", "Terciarios"]] = None
+    sector: Optional[str] = Field(default=None, max_length=255)
     dni: Optional[int] = None
     address: Optional[str] = None
     date_of_birthday: Optional[str] = None
