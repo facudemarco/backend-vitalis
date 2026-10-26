@@ -172,6 +172,38 @@ class PatientPublicationTests(unittest.TestCase):
         self.app.dependency_overrides.clear()
         self.assertEqual(self.client.get("/studies/patient/patient").status_code, 401)
 
+    def test_only_admin_and_secretary_can_delete_studies_or_files(self):
+        for role in ("company", "professional", "patient"):
+            self.user.role = role
+            for path in ("/studies/study", "/studies/study/files/file", "/studies/study/files/report"):
+                self.assertEqual(self.client.delete(path).status_code, 403)
+
+    def test_admin_and_secretary_can_delete_report_without_removing_study(self):
+        for role in ("admin", "secretary"):
+            self.user.role = role
+            self.sql(f"INSERT INTO study_files (id,study_id,is_report,file_path) VALUES ('report-{role}','study',1,'report.pdf')")
+            self.assertEqual(self.client.delete(f"/studies/study/files/report-{role}").status_code, 200)
+            with SQLiteSession(self.engine) as db:
+                self.assertEqual(db.execute(text("SELECT COUNT(*) FROM studies WHERE id='study'")).scalar(), 1)
+                self.assertEqual(db.execute(text("SELECT COUNT(*) FROM study_files WHERE id='file'")).scalar(), 1)
+
+    def test_admin_and_secretary_can_delete_study_with_all_files(self):
+        for role in ("admin", "secretary"):
+            self.user.role = role
+            self.sql(f"INSERT INTO studies (id,patient_id,study_type,status) VALUES ('{role}-study','patient','Opcional','pending')")
+            self.sql(f"INSERT INTO study_files (id,study_id,is_report,file_path) VALUES ('{role}-file','{role}-study',0,'{role}.pdf')")
+            Path(self.files.name, f"{role}.pdf").write_bytes(b"%PDF-test")
+            self.assertEqual(self.client.delete(f"/studies/{role}-study").status_code, 200)
+            with SQLiteSession(self.engine) as db:
+                self.assertEqual(db.execute(text("SELECT COUNT(*) FROM studies WHERE id=:id"), {"id": f"{role}-study"}).scalar(), 0)
+                self.assertEqual(db.execute(text("SELECT COUNT(*) FROM study_files WHERE study_id=:id"), {"id": f"{role}-study"}).scalar(), 0)
+            self.assertFalse(Path(self.files.name, f"{role}.pdf").exists())
+
+    def test_file_cannot_be_deleted_through_a_different_study(self):
+        self.user.role = "admin"
+        self.assertEqual(self.client.delete("/studies/other-study/files/file").status_code, 404)
+        self.assertTrue(Path(self.files.name, "test.pdf").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
