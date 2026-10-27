@@ -13,3 +13,4 @@ studies/
 tests/*
 !tests/test_patient_publication.py
 !tests/test_medical_record_fields.py
+!tests/test_medical_record_save.py

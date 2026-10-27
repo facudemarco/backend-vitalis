@@ -3,3 +3,5 @@
 ALTER TABLE medical_record_data
     ADD COLUMN IF NOT EXISTS education_level VARCHAR(20) NULL,
     ADD COLUMN IF NOT EXISTS sector VARCHAR(255) NULL;
+
+ALTER TABLE medical_record_data MODIFY COLUMN phone BIGINT NULL;

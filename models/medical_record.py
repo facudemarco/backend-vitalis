@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 from typing import Optional, List, Any, Literal
 import json
 from datetime import datetime
@@ -56,6 +56,11 @@ class MedicalRecordData(BaseModel):
     phone: Optional[int] = None
     sons: Optional[int] = None
     tasks: Optional[str] = None
+
+    @field_validator("education_level", mode="before")
+    @classmethod
+    def normalize_optional_education(cls, value):
+        return (value.strip() or None) if isinstance(value, str) else value
 
 class MedicalRecordDataImg(BaseModel):
     id: Optional[str] = None
