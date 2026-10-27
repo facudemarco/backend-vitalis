@@ -24,7 +24,7 @@ class MedicalRecordSaveTests(unittest.TestCase):
             db.execute(text("CREATE TABLE patients (id TEXT PRIMARY KEY, company_id TEXT)"))
             db.execute(text("INSERT INTO patients VALUES ('patient', NULL)"))
             db.execute(text("CREATE TABLE medical_record (id TEXT PRIMARY KEY, patient_id TEXT)"))
-            db.execute(text("CREATE TABLE medical_record_data (id TEXT PRIMARY KEY, medical_record_id TEXT, complete_name TEXT, company_name TEXT, phone INTEGER, education_level TEXT, sector TEXT)"))
+            db.execute(text("CREATE TABLE medical_record_data (id TEXT PRIMARY KEY, medical_record_id TEXT, complete_name TEXT, company_name TEXT, phone INTEGER, education_level TEXT, sector TEXT, age TEXT)"))
         self.schema_missing = False
         self.phone_bigint = True
         self.files = tempfile.TemporaryDirectory()
@@ -109,3 +109,17 @@ class MedicalRecordSaveTests(unittest.TestCase):
 
     def test_invalid_education_is_still_a_validation_error(self):
         self.assertEqual(self.save({"education_level": "Otra opción"}).status_code, 422)
+
+    def test_age_persists_as_text_on_create_and_update(self):
+        response = self.save({"age": "35"})
+        self.assertEqual(response.status_code, 200, response.text)
+        updated = self.save({"age": "150"}, record_id=response.json()["id"])
+        self.assertEqual(updated.status_code, 200, updated.text)
+        with self.engine.connect() as db:
+            row = db.execute(text("SELECT age FROM medical_record_data")).scalar()
+        self.assertEqual(row, "150")
+
+    def test_out_of_range_age_cannot_create_a_record(self):
+        self.assertEqual(self.save({"age": "151"}).status_code, 422)
+        with self.engine.connect() as db:
+            self.assertEqual(db.execute(text("SELECT COUNT(*) FROM medical_record")).scalar(), 0)

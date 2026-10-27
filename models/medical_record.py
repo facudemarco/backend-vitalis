@@ -47,6 +47,7 @@ class MedicalRecordData(BaseModel):
     company_name: Optional[str] = None
     education_level: Optional[Literal["Primarios", "Secundarios", "Terciarios"]] = None
     sector: Optional[str] = Field(default=None, max_length=255)
+    age: Optional[str] = Field(default=None, pattern=r"^(?:[1-9][0-9]?|1[0-4][0-9]|150)$")
     dni: Optional[int] = None
     address: Optional[str] = None
     date_of_birthday: Optional[str] = None
@@ -61,6 +62,11 @@ class MedicalRecordData(BaseModel):
     @classmethod
     def normalize_optional_education(cls, value):
         return (value.strip() or None) if isinstance(value, str) else value
+
+    @field_validator("age", mode="before")
+    @classmethod
+    def normalize_optional_age(cls, value):
+        return None if value == "" else value
 
 class MedicalRecordDataImg(BaseModel):
     id: Optional[str] = None

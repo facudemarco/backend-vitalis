@@ -33,3 +33,19 @@ class MedicalRecordFieldsTests(unittest.TestCase):
         MedicalRecordData(sector="x" * 255)
         with self.assertRaises(ValidationError):
             MedicalRecordData(sector="x" * 256)
+
+    def test_age_is_a_string_between_one_and_150(self):
+        for value in ("1", "35", "99", "100", "149", "150"):
+            with self.subTest(value=value):
+                record = MedicalRecordData(age=value)
+                self.assertEqual(record.age, value)
+                self.assertIsInstance(record.model_dump()["age"], str)
+
+    def test_age_rejects_invalid_values_and_numeric_payloads(self):
+        for value in ("0", "151", "999", "01", "1.5", "-1", "+2", "1e2", "abc", " 2", "2 ", 35):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                MedicalRecordData(age=value)
+
+    def test_legacy_or_empty_age_is_unset(self):
+        self.assertIsNone(MedicalRecordData().age)
+        self.assertIsNone(MedicalRecordData(age="").age)
