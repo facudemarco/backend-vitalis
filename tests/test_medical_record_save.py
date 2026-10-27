@@ -5,6 +5,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from typing import get_args
+
+from pydantic import BaseModel
+from models.medical_record import MedicalRecordFullRequest, MedicalRecordFullResponse
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -21,8 +25,8 @@ class MedicalRecordSaveTests(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         with self.engine.begin() as db:
-            db.execute(text("CREATE TABLE patients (id TEXT PRIMARY KEY, company_id TEXT)"))
-            db.execute(text("INSERT INTO patients VALUES ('patient', NULL)"))
+            db.execute(text("CREATE TABLE patients (id TEXT PRIMARY KEY, company_id TEXT, user_id TEXT, patient_status TEXT)"))
+            db.execute(text("INSERT INTO patients VALUES ('patient', NULL, 'patient-user', 'En Proceso')"))
             db.execute(text("CREATE TABLE medical_record (id TEXT PRIMARY KEY, patient_id TEXT)"))
             db.execute(text("CREATE TABLE medical_record_data (id TEXT PRIMARY KEY, medical_record_id TEXT, complete_name TEXT, company_name TEXT, phone INTEGER, education_level TEXT, sector TEXT, age TEXT)"))
         self.schema_missing = False
@@ -123,3 +127,65 @@ class MedicalRecordSaveTests(unittest.TestCase):
         self.assertEqual(self.save({"age": "151"}).status_code, 422)
         with self.engine.connect() as db:
             self.assertEqual(db.execute(text("SELECT COUNT(*) FROM medical_record")).scalar(), 0)
+
+    def test_every_clinical_section_survives_create_read_and_update(self):
+        """Exercise the real HTTP handlers with every current schema field.
+
+        This disposable schema proves serialization, not a production migration.
+        New model fields automatically participate in the round trip.
+        """
+        def model_for(annotation):
+            return next((t for t in (annotation, *get_args(annotation))
+                         if isinstance(t, type) and issubclass(t, BaseModel)), None)
+
+        def scalar_type(annotation):
+            return next((t for t in (annotation, *get_args(annotation))
+                         if t in (str, int, float, bool)), str)
+
+        with self.engine.begin() as db:
+            for table, info in MedicalRecordFullResponse.model_fields.items():
+                model = model_for(info.annotation)
+                if not model or not table.startswith("medical_record_"):
+                    continue
+                if table == "medical_record_data":
+                    db.execute(text("DROP TABLE medical_record_data"))
+                columns = []
+                for name, field in model.model_fields.items():
+                    kind = scalar_type(field.annotation)
+                    sql_type = "REAL" if kind is float else "INTEGER" if kind in (int, bool) else "TEXT"
+                    columns.append(f'"{name}" {sql_type}' + (" PRIMARY KEY" if name == "id" else ""))
+                db.execute(text(f'CREATE TABLE IF NOT EXISTS "{table}" ({", ".join(columns)})'))
+
+        def fixture(updated=False):
+            sections = {}
+            for table, info in MedicalRecordFullRequest.model_fields.items():
+                model = model_for(info.annotation)
+                if not model or table == "medical_record_data_img":
+                    continue
+                values = {}
+                for name, field in model.model_fields.items():
+                    if name in ("id", "medical_record_id", "created_at"):
+                        continue
+                    kind = scalar_type(field.annotation)
+                    values[name] = not updated if kind is bool else 42 if kind is int else 42.5 if kind is float else "Actualizado" if updated else "Prueba ficticia"
+                    if name == "education_level":
+                        values[name] = None if updated else "Primarios"
+                    if name == "age" and table == "medical_record_data":
+                        values[name] = "150" if updated else "35"
+                sections[table] = values
+            return sections
+
+        record_id = None
+        for updated in (False, True):
+            expected = fixture(updated)
+            response = self.client.request("PUT" if updated else "POST", f"/medical-records/{record_id or ''}",
+                data={"patient_id": "patient", "data": json.dumps(expected)})
+            self.assertEqual(response.status_code, 200, response.text)
+            record_id = response.json().get("id", record_id)
+            read = self.client.get("/medical-records/patient/patient")
+            self.assertEqual(read.status_code, 200, read.text)
+            actual = read.json()[0]
+            for section, fields in expected.items():
+                for name, value in fields.items():
+                    with self.subTest(updated=updated, section=section, field=name):
+                        self.assertEqual(actual[section][name], value)

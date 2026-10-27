@@ -620,6 +620,7 @@ class MedicalRecordFullRequest(BaseModel):
         return normalize_empty_fields(value)
 
 class MedicalRecordFullResponse(BaseModel):
+    medical_record_ophthalmology: Optional[MedicalRecordOphthalmology] = None
     id: str
     patient_id: str
     
