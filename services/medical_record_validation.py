@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
-LABELS = {"phone": "Teléfono", "education_level": "Estudios", "sector": "Sector", "sons": "Cantidad de hijos"}
+LABELS = {"phone": "Teléfono", "education_level": "Estudios", "sector": "Sector", "sons": "Cantidad de hijos", "age": "Edad"}
 
 
 def get_section_schema(db, table):
