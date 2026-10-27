@@ -15,7 +15,7 @@ class MedicalRecordFieldsTests(unittest.TestCase):
                 self.assertEqual(reloaded.company_name, "Empresa de prueba")
 
     def test_invalid_education_is_rejected(self):
-        for level in ("Universitarios", "", "primarios"):
+        for level in ("Universitarios", "primarios"):
             with self.subTest(level=level), self.assertRaises(ValidationError):
                 MedicalRecordData(education_level=level)
 
@@ -24,6 +24,10 @@ class MedicalRecordFieldsTests(unittest.TestCase):
         self.assertIsNone(record.education_level)
         self.assertIsNone(record.sector)
         self.assertNotIn("education_level", record.model_dump(exclude_unset=True))
+
+    def test_education_can_be_omitted_or_cleared(self):
+        for value in (None, "", "  "):
+            self.assertIsNone(MedicalRecordData(education_level=value).education_level)
 
     def test_sector_length_is_bounded(self):
         MedicalRecordData(sector="x" * 255)
