@@ -115,9 +115,11 @@ class MedicalRecordSaveTests(unittest.TestCase):
         self.assertEqual(self.save({"education_level": "Otra opción"}).status_code, 422)
 
     def test_age_persists_as_text_on_create_and_update(self):
-        response = self.save({"age": "35"})
+        response = self.save({"age": "28 años"})
         self.assertEqual(response.status_code, 200, response.text)
-        updated = self.save({"age": "150"}, record_id=response.json()["id"])
+        with self.engine.connect() as db:
+            self.assertEqual(db.execute(text("SELECT age FROM medical_record_data")).scalar(), "28")
+        updated = self.save({"age": "150 años"}, record_id=response.json()["id"])
         self.assertEqual(updated.status_code, 200, updated.text)
         with self.engine.connect() as db:
             row = db.execute(text("SELECT age FROM medical_record_data")).scalar()

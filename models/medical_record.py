@@ -101,7 +101,14 @@ class MedicalRecordData(BaseModel):
     @field_validator("age", mode="before")
     @classmethod
     def normalize_optional_age(cls, value):
-        return None if value == "" else value
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            match = re.fullmatch(r"([1-9][0-9]?|1[0-4][0-9]|150)(?:\s*años?)?", value, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return value
 
 class MedicalRecordDataImg(BaseModel):
     id: Optional[str] = None
