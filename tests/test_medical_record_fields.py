@@ -42,8 +42,13 @@ class MedicalRecordFieldsTests(unittest.TestCase):
                 self.assertEqual(record.age, value)
                 self.assertIsInstance(record.model_dump()["age"], str)
 
+    def test_age_accepts_year_suffix_and_stores_only_the_number(self):
+        for raw, expected in (("28 años", "28"),("1 año", "1"),("150 AÑOS", "150"),("28años", "28"),(" 28 años ", "28")):
+            with self.subTest(value=raw):
+                self.assertEqual(MedicalRecordData(age=raw).age, expected)
+
     def test_age_rejects_invalid_values_and_numeric_payloads(self):
-        for value in ("0", "151", "999", "01", "1.5", "-1", "+2", "1e2", "abc", " 2", "2 ", 35):
+        for value in ("0", "151", "999", "01", "1.5", "-1", "+2", "1e2", "abc", "151 años", "28 meses", "28.5 años", "0 años", "01 años", 35):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 MedicalRecordData(age=value)
 
