@@ -2,6 +2,9 @@ from pydantic import BaseModel, Field, model_validator, field_validator
 from typing import Optional, List, Any, Literal
 import json
 from datetime import datetime
+import math
+import re
+from decimal import Decimal
 
 # -------------------------------------------------------------------
 # Tablas individuales
@@ -39,6 +42,38 @@ class MedicalRecordClinicalExam(BaseModel):
     imc: Optional[float] = None
     ta_min: Optional[float] = None
     ta_max: Optional[float] = None
+
+    @field_validator("talla", "peso", "saturacion", "imc", "ta_min", "ta_max", mode="before")
+    @classmethod
+    def normalize_measurement(cls, value, info):
+        if value is None or isinstance(value, str) and not value.strip():
+            return None
+        units = {"talla": "cm", "peso": "kg", "saturacion": "%", "imc": "", "ta_min": "mmHg", "ta_max": "mmHg"}
+        unit = units[info.field_name]
+        if isinstance(value, Decimal):
+            # DECIMAL columns can return trailing zeroes even for an old valid BMI.
+            raw = format(value, "f")
+            if "." in raw:
+                raw = raw.rstrip("0").rstrip(".")
+        else:
+            raw = str(value).strip() if isinstance(value, (str, float, int)) and not isinstance(value, bool) else ""
+        match = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s*" + (rf"(?:{re.escape(unit)})?" if unit else ""), raw, re.IGNORECASE)
+        if not match:
+            raise ValueError(f"Ingresá un número válido{f' en {unit}' if unit else ''}.")
+        number = match.group(1).replace(",", ".")
+        parsed = float(number)
+        if not math.isfinite(parsed):
+            raise ValueError("Ingresá un número finito.")
+        return parsed
+
+class MedicalRecordClinicalExamInput(MedicalRecordClinicalExam):
+    @field_validator("imc")
+    @classmethod
+    def validate_imc_precision(cls, value):
+        # Restrict new writes while allowing older records to be read unchanged.
+        if value is not None and Decimal(str(value)).as_tuple().exponent < -2:
+            raise ValueError("El IMC admite un entero o hasta dos decimales.")
+        return value
 
 class MedicalRecordData(BaseModel):
     id: Optional[str] = None
@@ -561,7 +596,7 @@ class MedicalRecordFullRequest(BaseModel):
     
     medical_record_bucodental_exam: Optional[MedicalRecordBucodentalExam] = Field(None, description="**Medical Record Bucodental Exam**")
     medical_record_cardiovascular_exam: Optional[MedicalRecordCardiovascularExam] = Field(None, description="**Medical Record Cardiovascular Exam**")
-    medical_record_clinical_exam: Optional[MedicalRecordClinicalExam] = Field(None, description="**Medical Record Clinical Exam**")
+    medical_record_clinical_exam: Optional[MedicalRecordClinicalExamInput] = Field(None, description="**Medical Record Clinical Exam**")
     medical_record_data: Optional[MedicalRecordData] = Field(None, description="**Medical Record Data**")
     medical_record_data_img: Optional[MedicalRecordDataImg] = Field(None, description="**Medical Record Data Img**")
     medical_record_derivations: Optional[MedicalRecordDerivations] = Field(None, description="**Medical Record Derivations**")
