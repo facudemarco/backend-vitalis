@@ -1,7 +1,8 @@
 import unittest
+from decimal import Decimal
 
 from pydantic import ValidationError
-from models.medical_record import MedicalRecordData
+from models.medical_record import MedicalRecordData, MedicalRecordClinicalExamInput as MedicalRecordClinicalExam, MedicalRecordFullResponse
 
 
 class MedicalRecordFieldsTests(unittest.TestCase):
@@ -49,3 +50,27 @@ class MedicalRecordFieldsTests(unittest.TestCase):
     def test_legacy_or_empty_age_is_unset(self):
         self.assertIsNone(MedicalRecordData().age)
         self.assertIsNone(MedicalRecordData(age="").age)
+
+
+class ClinicalMeasurementTests(unittest.TestCase):
+    def test_units_and_comma_decimals_normalize_to_canonical_numbers(self):
+        record = MedicalRecordClinicalExam(talla="175cm", peso="80 KG", saturacion="99%", imc="20,15", ta_min="80mmhg", ta_max="120 mmHg")
+        self.assertEqual(record.model_dump(exclude_none=True), {"talla":175.0,"peso":80.0,"saturacion":99.0,"imc":20.15,"ta_min":80.0,"ta_max":120.0})
+
+    def test_imc_accepts_integer_one_or_two_decimals(self):
+        for value in (20, 20.1, 20.15, "20", "20,1", "20.15"):
+            self.assertEqual(MedicalRecordClinicalExam(imc=value).imc, float(str(value).replace(",", ".")))
+
+    def test_wrong_units_invalid_numbers_and_excess_imc_precision_are_rejected(self):
+        for key,value in (("talla","175kg"),("peso","80cm"),("saturacion","99kg"),("imc","20.123"),("imc","20kg"),("ta_min","80cm"),("ta_max","120/80"),("peso",float("nan")),("peso",True),("peso",-1)):
+            with self.subTest(field=key,value=value), self.assertRaises(ValidationError):
+                MedicalRecordClinicalExam(**{key:value})
+
+    def test_blank_measurements_and_existing_numbers_remain_compatible(self):
+        self.assertIsNone(MedicalRecordClinicalExam(peso=" ").peso)
+        self.assertEqual(MedicalRecordClinicalExam(talla=175,peso=80.5).peso,80.5)
+        self.assertEqual(MedicalRecordClinicalExam(imc=Decimal("20.1500")).imc,20.15)
+
+    def test_legacy_bmi_with_more_decimals_remains_readable(self):
+        record=MedicalRecordFullResponse.model_validate({"id":"legacy", "patient_id":"patient", "medical_record_clinical_exam":{"imc":20.123}})
+        self.assertEqual(record.medical_record_clinical_exam.imc,20.123)

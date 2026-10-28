@@ -189,3 +189,18 @@ class MedicalRecordSaveTests(unittest.TestCase):
                 for name, value in fields.items():
                     with self.subTest(updated=updated, section=section, field=name):
                         self.assertEqual(actual[section][name], value)
+
+    def test_clinical_units_survive_real_save_and_read(self):
+        with self.engine.begin() as db:
+            db.execute(text("CREATE TABLE medical_record_clinical_exam (id TEXT PRIMARY KEY, medical_record_id TEXT, talla REAL, peso REAL, saturacion REAL, imc REAL, ta_min REAL, ta_max REAL)"))
+        values={"talla":"175cm","peso":"80kg","saturacion":"99%","imc":"20,15","ta_min":"80mmhg","ta_max":"120 mmHg"}
+        response=self.client.post("/medical-records/",data={"patient_id":"patient","data":json.dumps({"medical_record_clinical_exam":values})})
+        self.assertEqual(response.status_code,200,response.text)
+        with self.engine.connect() as db:
+            actual=db.execute(text("SELECT talla,peso,saturacion,imc,ta_min,ta_max FROM medical_record_clinical_exam")).mappings().one()
+        self.assertEqual(dict(actual),dict(zip(values,[175,80,99,20.15,80,120])))
+        values["imc"]="20.123"
+        rejected=self.client.put("/medical-records/"+response.json()["id"],data={"patient_id":"patient","data":json.dumps({"medical_record_clinical_exam":values})})
+        self.assertEqual(rejected.status_code,422,rejected.text)
+        with self.engine.connect() as db:
+            self.assertEqual(db.execute(text("SELECT imc FROM medical_record_clinical_exam")).scalar(),20.15)
