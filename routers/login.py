@@ -4,11 +4,12 @@ from queue import PriorityQueue
 from fastapi import FastAPI, Depends, HTTPException, APIRouter, Response, Cookie, Request, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
-from auth.authentication import oauth2_scheme, get_current_user, create_access_token, verify_token, require_roles, require_active_user
+from auth.authentication import oauth2_scheme, get_current_user, create_access_token, verify_token, require_roles, require_active_user, ACCESS_TOKEN_EXPIRE_MINUTES
 from models.user import User, UserCreate, UserUpdate, UserSchema
 from Database.getConnection import getConnectionForLogin, getConnection
 from Database.users import get_user_by_email, authenticate_user, resolve_profile_ids, build_token_payload
 from sqlalchemy import JSON, text
+from services.patient_access import require_patient_access
 import uuid
 import os
 from typing import Annotated, Optional, Union
@@ -34,7 +35,7 @@ async def login(response: Response, email: str = Form(...), password: str = Form
         httponly=True,
         secure=True,       
         samesite="none",    
-        max_age=60 * 60 * 24 * 7,   
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
     return {
@@ -73,6 +74,41 @@ async def verify_current_token(request: Request):
     except HTTPException:
         return {"valid": False, "detail": "Invalid token"}
     
+# A fresh six-hour work window is issued only after checking the patient and editor.
+def medical_session_response(response, user, patient_id, expected_user_id=None):
+    if not user.is_active or user.role not in ("admin", "professional"):
+        raise HTTPException(status_code=403, detail="No tenés permiso para editar fichas médicas.")
+    if expected_user_id and str(user.id) != expected_user_id:
+        raise HTTPException(status_code=409, detail="Ingresá con la misma cuenta con la que abriste esta ficha.")
+    db = getConnectionForLogin()
+    if db is None:
+        raise HTTPException(status_code=503, detail="No se pudo verificar el acceso a la ficha.")
+    try:
+        require_patient_access(db, user, patient_id)
+    finally:
+        db.close()
+    token = create_access_token({"id": str(user.id), "role": user.role})
+    response.set_cookie(key="Authorization", value=f"Bearer {token}", httponly=True,
+        secure=True, samesite="none", max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/")
+    return {"user_id": str(user.id), "expires_at": verify_token(token)["exp"]}
+
+
+@router.post("/medical-session/{patient_id}", tags=["login"])
+async def begin_medical_session(patient_id: str, response: Response,
+    expected_user_id: Optional[str] = Form(None),
+    current_user: UserSchema = Depends(require_active_user)):
+    return medical_session_response(response, current_user, patient_id, expected_user_id)
+
+
+@router.post("/medical-session/{patient_id}/reauthenticate", tags=["login"])
+async def reauthenticate_medical_session(patient_id: str, response: Response,
+    email: str = Form(...), password: str = Form(...), expected_user_id: Optional[str] = Form(None)):
+    user = authenticate_user(email, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos.")
+    return medical_session_response(response, user, patient_id, expected_user_id)
+
+
 # Register
 @router.post("/auth/register/patient", tags=["Register"])
 async def register_patient(

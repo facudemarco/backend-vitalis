@@ -148,6 +148,7 @@ async def create_medical_record(
     fecha_medico_laboral: Optional[date] = Form(None),
     firma_responsable: UploadFile = File(None),
     fecha_responsable: Optional[date] = Form(None),
+    editor_user_id: Optional[str] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
     """
@@ -157,6 +158,8 @@ async def create_medical_record(
     - **data_img**: Optional image for medical record data.
     - **file**: Optional signature image file.
     """
+    if editor_user_id and editor_user_id != str(current_user.id):
+        raise HTTPException(status_code=409, detail="La sesión cambió de cuenta. Volvé a ingresar con la cuenta original de la ficha.")
     request_model = data
 
     db = getConnectionForLogin()
@@ -714,8 +717,11 @@ async def update_medical_record(
     fecha_paciente: Optional[date] = Form(None),
     firma_responsable: UploadFile = File(None),
     fecha_responsable: Optional[date] = Form(None),
+    editor_user_id: Optional[str] = Form(None),
     current_user: UserSchema = Depends(require_roles("professional", "admin"))
 ):
+    if editor_user_id and editor_user_id != str(current_user.id):
+        raise HTTPException(status_code=409, detail="La sesión cambió de cuenta. Volvé a ingresar con la cuenta original de la ficha.")
     request_model = data
     db = getConnectionForLogin()
     if db is None:

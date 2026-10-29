@@ -206,3 +206,15 @@ class MedicalRecordSaveTests(unittest.TestCase):
         self.assertEqual(rejected.status_code,422,rejected.text)
         with self.engine.connect() as db:
             self.assertEqual(db.execute(text("SELECT imc FROM medical_record_clinical_exam")).scalar(),20.15)
+
+    def test_account_change_is_rejected_before_creating_or_updating_a_record(self):
+        payload={"patient_id":"patient","editor_user_id":"another-editor","data":json.dumps({"medical_record_data":{"complete_name":"No guardar"}})}
+        response=self.client.post("/medical-records/",data=payload)
+        self.assertEqual(response.status_code,409,response.text)
+        with self.engine.connect() as db:
+            self.assertEqual(db.execute(text("SELECT COUNT(*) FROM medical_record")).scalar(),0)
+        created=self.save({"complete_name":"Nombre previo"})
+        response=self.client.put("/medical-records/"+created.json()["id"],data=payload)
+        self.assertEqual(response.status_code,409,response.text)
+        with self.engine.connect() as db:
+            self.assertEqual(db.execute(text("SELECT complete_name FROM medical_record_data")).scalar(),"Nombre previo")
