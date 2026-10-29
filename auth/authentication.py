@@ -2,7 +2,7 @@ from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, status, HTTPException, Request
 from jose import JWTError, jwt, ExpiredSignatureError
 from pydantic import ValidationError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable
 from sqlalchemy import text
 from Database.getConnection import engine
@@ -11,7 +11,7 @@ from models.user import User, UserSchema
 
 SECRET_KEY = "MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Vitalis"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = 6 * 60
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/login",
@@ -22,11 +22,13 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 def create_access_token(data: dict):
     """Crea JWT con solo: id, role, exp"""
+    now = datetime.now(timezone.utc)
     to_encode = {
         "id": data.get("id"),
-        "role": data.get("role")
+        "role": data.get("role"),
+        "iat": now,
     }
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
