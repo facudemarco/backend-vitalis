@@ -192,6 +192,10 @@ async def create_study(
                 SELECT requires_report
                 FROM studies_admin
                 WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                   OR (
+                       LOWER(TRIM(:study_type)) = 'analisis-clinico'
+                       AND LOWER(TRIM(name)) = LOWER('Análisis clínicos de laboratorio')
+                   )
                 LIMIT 1
             """),
             {"study_type": study_type}
@@ -303,6 +307,10 @@ async def get_studies(patient_id: str, current_user: User = Depends(require_acti
                         SELECT sa.requires_report
                         FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR (
+                               LOWER(TRIM(s.study_type)) = 'analisis-clinico'
+                               AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
+                           )
                         LIMIT 1
                     ), 1) AS requires_report
                 FROM studies s
@@ -377,6 +385,10 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
                         SELECT sa.requires_report
                         FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR (
+                               LOWER(TRIM(s.study_type)) = 'analisis-clinico'
+                               AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
+                           )
                         LIMIT 1
                     ), 1) AS requires_report
                 FROM studies s
@@ -528,19 +540,16 @@ async def update_study(
         if not row:
             raise HTTPException(status_code=404, detail="Study not found")
         
-        if status is not None:
-            if current_user.role == "professional":
-                prof_row = db.execute(
-                    text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
-                    {"uid": current_user.id}
-                ).mappings().first()
-                if not prof_row:
-                    raise HTTPException(status_code=403, detail="Professional record not found")
-                
-                rol = prof_row["rol"]
-                if rol != "especialista":
-                    raise HTTPException(status_code=403, detail="Only specialists can change study status")
-        
+        professional_role = None
+        if current_user.role == "professional" and status is not None:
+            prof_row = db.execute(
+                text("SELECT rol FROM professionals WHERE user_id = :uid LIMIT 1"),
+                {"uid": current_user.id}
+            ).mappings().first()
+            if not prof_row:
+                raise HTTPException(status_code=403, detail="Professional record not found")
+            professional_role = prof_row["rol"]
+
         if status == "Disponible":
             effective_study_type = study_type or row["study_type"]
             requires_report = db.execute(
@@ -548,10 +557,19 @@ async def update_study(
                     SELECT requires_report
                     FROM studies_admin
                     WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                       OR (
+                           LOWER(TRIM(:study_type)) = 'analisis-clinico'
+                           AND LOWER(TRIM(name)) = LOWER('Análisis clínicos de laboratorio')
+                       )
                     LIMIT 1
                 """),
                 {"study_type": effective_study_type}
             ).scalar()
+
+            # Non-specialist professionals may confirm only categories that do not require a report.
+            if current_user.role == "professional" and professional_role != "especialista":
+                if requires_report is None or bool(requires_report):
+                    raise HTTPException(status_code=403, detail="Solo especialistas pueden confirmar estudios que requieren informe")
 
             # Unmatched legacy types keep the existing required-report behavior.
             if requires_report is None or bool(requires_report):
