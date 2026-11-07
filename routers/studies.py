@@ -184,6 +184,22 @@ async def create_study(
             else:
                 raise HTTPException(status_code=403, detail="Invalid professional role")
 
+        # Categories configured without a mandatory report are immediately available.
+        # The report requirement takes precedence over the professional's default pending status
+        # and over the client-provided status so these studies never need a separate confirmation.
+        category_requires_report = db.execute(
+            text("""
+                SELECT requires_report
+                FROM studies_admin
+                WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                LIMIT 1
+            """),
+            {"study_type": study_type}
+        ).scalar()
+
+        if category_requires_report is not None and not bool(category_requires_report):
+            status = "Disponible"
+
         study_id = str(consent_id_to_complete or uuid.uuid4())
         created_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
