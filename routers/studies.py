@@ -192,6 +192,10 @@ async def create_study(
                 SELECT requires_report
                 FROM studies_admin
                 WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                   OR (
+                       LOWER(TRIM(:study_type)) = 'analisis-clinico'
+                       AND LOWER(TRIM(name)) = LOWER('Análisis clínicos de laboratorio')
+                   )
                 LIMIT 1
             """),
             {"study_type": study_type}
@@ -303,6 +307,10 @@ async def get_studies(patient_id: str, current_user: User = Depends(require_acti
                         SELECT sa.requires_report
                         FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR (
+                               LOWER(TRIM(s.study_type)) = 'analisis-clinico'
+                               AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
+                           )
                         LIMIT 1
                     ), 1) AS requires_report
                 FROM studies s
@@ -377,6 +385,10 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
                         SELECT sa.requires_report
                         FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR (
+                               LOWER(TRIM(s.study_type)) = 'analisis-clinico'
+                               AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
+                           )
                         LIMIT 1
                     ), 1) AS requires_report
                 FROM studies s
@@ -548,6 +560,10 @@ async def update_study(
                     SELECT requires_report
                     FROM studies_admin
                     WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                       OR (
+                           LOWER(TRIM(:study_type)) = 'analisis-clinico'
+                           AND LOWER(TRIM(name)) = LOWER('Análisis clínicos de laboratorio')
+                       )
                     LIMIT 1
                 """),
                 {"study_type": effective_study_type}
