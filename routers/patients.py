@@ -4,7 +4,7 @@ from models.user import User
 from auth.authentication import require_active_user, require_roles
 from Database.getConnection import getConnectionForLogin
 from sqlalchemy import text
-from services.patient_access import require_patient_access, studies_are_ready
+from services.patient_access import require_patient_access, get_patient_study_completion_issues
 from services.data_deletion import delete_related_records, deletion_confirmation_token, remove_related_files, summarize_related_records
 import os
 from pathlib import Path
@@ -149,6 +149,7 @@ async def getPatients(current_user: User = Depends(require_active_user)):
 async def update_patient_status(
     patient_id: str,
     patient_status: str = Body(..., embed=True),
+    confirm_incomplete: bool = Body(False, embed=True),
     current_user: User = Depends(require_roles("admin", "secretary")),
 ):
     """Actualiza el estado operativo de un paciente (solo admin y secretaría)."""
@@ -170,11 +171,22 @@ async def update_patient_status(
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
 
-        if patient_status == "Completado" and current_user.role != "admin" and not studies_are_ready(db, patient_id):
-            raise HTTPException(
-                status_code=409,
-                detail="No se puede completar: faltan estudios, archivos o informes obligatorios, o hay estudios pendientes. Contactá a un administrador para autorizar la excepción.",
-            )
+        if patient_status == "Completado":
+            readiness = get_patient_study_completion_issues(db, patient_id)
+            if not readiness["ready"] and not confirm_incomplete:
+                message = (
+                    "No hay estudios cargados."
+                    if readiness["no_studies"]
+                    else f"Faltan {readiness['incomplete_count']} de {readiness['study_count']} estudios por completar."
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "PATIENT_STUDIES_INCOMPLETE",
+                        "message": message,
+                        **readiness,
+                    },
+                )
 
         db.execute(
             text("UPDATE patients SET patient_status = :patient_status WHERE id = :patient_id"),
