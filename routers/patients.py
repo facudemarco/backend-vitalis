@@ -29,6 +29,7 @@ def _format_patient(row) -> dict:
         "user_id": row["user_id"],
         "study_type": row["study_type"],
         "company_name": row.get("company_name"),
+        "created_at": row.get("account_created_at") or row.get("created_at"),
         "is_active": row.get("is_active"),
         "patient_status": (
             "Completado" if row.get("patient_status") == "Completado"
@@ -56,20 +57,29 @@ async def get_patients(
         raise HTTPException(status_code=500, detail="Database connection error")
     
     try:
-        query = text("SELECT id, first_name, last_name, dni, date_of_birth, phone, address, social_security, company_id, user_id, study_type, patient_status FROM patients WHERE 1=1")
+        query = text("""
+            SELECT patients.id, patients.first_name, patients.last_name, patients.dni,
+                   patients.date_of_birth, patients.phone, patients.address,
+                   patients.social_security, patients.company_id, patients.user_id,
+                   patients.study_type, patients.patient_status,
+                   users.created_at AS account_created_at
+            FROM patients
+            LEFT JOIN users ON users.id = patients.user_id
+            WHERE 1=1
+        """)
         params = {}
         
         # Filtrar según rol
         if current_user.role in ("admin", "secretary"):
             # Admin ve todo, puede aplicar filtros opcionales
             if company_id:
-                query = text(query.text + " AND company_id = :company_id")
+                query = text(query.text + " AND patients.company_id = :company_id")
                 params["company_id"] = company_id
             if user_id:
-                query = text(query.text + " AND user_id = :user_id")
+                query = text(query.text + " AND patients.user_id = :user_id")
                 params["user_id"] = user_id
             if dni:
-                query = text(query.text + " AND dni LIKE :dni")
+                query = text(query.text + " AND patients.dni LIKE :dni")
                 params["dni"] = f"%{dni}%"
         
         elif current_user.role == "company":
@@ -81,22 +91,22 @@ async def get_patients(
             params["company_id"] = company_row["id"]
             query = text(query.text + " AND company_id = :company_id AND patient_status = 'Completado'")
             if dni:
-                query = text(query.text + " AND dni LIKE :dni")
+                query = text(query.text + " AND patients.dni LIKE :dni")
                 params["dni"] = f"%{dni}%"
             if user_id:
-                query = text(query.text + " AND user_id = :user_id")
+                query = text(query.text + " AND patients.user_id = :user_id")
                 params["user_id"] = user_id
         
         elif current_user.role == "professional":
             # Professional ve todos, puede filtrar por DNI
             if dni:
-                query = text(query.text + " AND dni LIKE :dni")
+                query = text(query.text + " AND patients.dni LIKE :dni")
                 params["dni"] = f"%{dni}%"
             if company_id:
-                query = text(query.text + " AND company_id = :company_id")
+                query = text(query.text + " AND patients.company_id = :company_id")
                 params["company_id"] = company_id
             if user_id:
-                query = text(query.text + " AND user_id = :user_id")
+                query = text(query.text + " AND patients.user_id = :user_id")
                 params["user_id"] = user_id
         
         else:
@@ -122,7 +132,8 @@ async def getPatients(current_user: User = Depends(require_active_user)):
         raise HTTPException(status_code=500, detail="Database connection error")
     try:
         query = """
-            SELECT patients.*, companies.name AS company_name, users.is_active
+            SELECT patients.*, companies.name AS company_name, users.is_active,
+                   users.created_at AS account_created_at
             FROM patients
             LEFT JOIN companies ON companies.id = patients.company_id
             LEFT JOIN users ON users.id = patients.user_id
