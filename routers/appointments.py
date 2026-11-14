@@ -75,26 +75,33 @@ async def appointment_patients(current_user: UserSchema = Depends(require_active
     try:
         if current_user.role == "patient":
             rows = db.execute(text("""
-                SELECT id, first_name, last_name, dni, phone, user_id, company_id
-                FROM patients WHERE user_id = :uid
+                SELECT p.id, p.first_name, p.last_name, p.dni, p.phone, p.user_id,
+                       p.company_id, c.name AS company_name
+                FROM patients p LEFT JOIN companies c ON c.id = p.company_id
+                WHERE p.user_id = :uid
             """), {"uid": current_user.id}).mappings().all()
         elif current_user.role == "company":
             company_id = _company_id(db, current_user.id)
             if not company_id:
                 return []
             rows = db.execute(text("""
-                SELECT id, first_name, last_name, dni, phone, user_id, company_id
-                FROM patients WHERE company_id = :cid ORDER BY last_name, first_name
+                SELECT p.id, p.first_name, p.last_name, p.dni, p.phone, p.user_id,
+                       p.company_id, c.name AS company_name
+                FROM patients p LEFT JOIN companies c ON c.id = p.company_id
+                WHERE p.company_id = :cid ORDER BY p.last_name, p.first_name
             """), {"cid": company_id}).mappings().all()
         elif current_user.role in ("admin", "secretary"):
             rows = db.execute(text("""
-                SELECT id, first_name, last_name, dni, phone, user_id, company_id
-                FROM patients ORDER BY last_name, first_name
+                SELECT p.id, p.first_name, p.last_name, p.dni, p.phone, p.user_id,
+                       p.company_id, c.name AS company_name
+                FROM patients p LEFT JOIN companies c ON c.id = p.company_id
+                ORDER BY p.last_name, p.first_name
             """)).mappings().all()
         else:
             raise HTTPException(status_code=403, detail="No tenés permiso para gestionar turnos")
         return [{"id": str(r["id"]), "first_name": r["first_name"], "last_name": r["last_name"],
-                 "dni": r["dni"], "phone": r["phone"], "company_id": str(r["company_id"]) if r["company_id"] else None}
+                 "dni": r["dni"], "phone": r["phone"], "company_id": str(r["company_id"]) if r["company_id"] else None,
+                 "company_name": r["company_name"]}
                 for r in rows]
     finally:
         db.close()
