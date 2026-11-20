@@ -192,6 +192,8 @@ async def create_study(
                 SELECT requires_report
                 FROM studies_admin
                 WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                   OR LOWER(TRIM(name)) = CONCAT(LOWER(TRIM(:study_type)), 's')
+                   OR LOWER(TRIM(:study_type)) = CONCAT(LOWER(TRIM(name)), 's')
                    OR (
                        LOWER(TRIM(:study_type)) = 'analisis-clinico'
                        AND LOWER(TRIM(name)) = LOWER('Análisis clínicos de laboratorio')
@@ -307,6 +309,8 @@ async def get_studies(patient_id: str, current_user: User = Depends(require_acti
                         SELECT sa.requires_report
                         FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR LOWER(TRIM(sa.name)) = CONCAT(LOWER(TRIM(s.study_type)), 's')
+                           OR LOWER(TRIM(s.study_type)) = CONCAT(LOWER(TRIM(sa.name)), 's')
                            OR (
                                LOWER(TRIM(s.study_type)) = 'analisis-clinico'
                                AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
@@ -385,6 +389,8 @@ async def get_study(study_id: str, current_user: User = Depends(require_active_u
                         SELECT sa.requires_report
                         FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR LOWER(TRIM(sa.name)) = CONCAT(LOWER(TRIM(s.study_type)), 's')
+                           OR LOWER(TRIM(s.study_type)) = CONCAT(LOWER(TRIM(sa.name)), 's')
                            OR (
                                LOWER(TRIM(s.study_type)) = 'analisis-clinico'
                                AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
@@ -557,6 +563,8 @@ async def update_study(
                     SELECT requires_report
                     FROM studies_admin
                     WHERE LOWER(TRIM(name)) = LOWER(TRIM(:study_type))
+                   OR LOWER(TRIM(name)) = CONCAT(LOWER(TRIM(:study_type)), 's')
+                   OR LOWER(TRIM(:study_type)) = CONCAT(LOWER(TRIM(name)), 's')
                        OR (
                            LOWER(TRIM(:study_type)) = 'analisis-clinico'
                            AND LOWER(TRIM(name)) = LOWER('Análisis clínicos de laboratorio')
