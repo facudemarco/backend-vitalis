@@ -149,7 +149,7 @@ async def create_medical_record(
     firma_responsable: UploadFile = File(None),
     fecha_responsable: Optional[date] = Form(None),
     editor_user_id: Optional[str] = Form(None),
-    current_user: UserSchema = Depends(require_roles("professional", "admin"))
+    current_user: UserSchema = Depends(require_roles("professional", "admin", "secretary"))
 ):
     """
     Create a complete medical record.
@@ -596,7 +596,7 @@ async def get_medical_records_by_patient(
 @router.delete("/{record_id}")
 async def delete_medical_record(
     record_id: str,
-    current_user: UserSchema = Depends(require_roles("admin", "professional"))
+    current_user: UserSchema = Depends(require_roles("admin", "professional", "secretary"))
 ):
     db = getConnectionForLogin()
     if db is None:
@@ -718,7 +718,7 @@ async def update_medical_record(
     firma_responsable: UploadFile = File(None),
     fecha_responsable: Optional[date] = Form(None),
     editor_user_id: Optional[str] = Form(None),
-    current_user: UserSchema = Depends(require_roles("professional", "admin"))
+    current_user: UserSchema = Depends(require_roles("professional", "admin", "secretary"))
 ):
     if editor_user_id and editor_user_id != str(current_user.id):
         raise HTTPException(status_code=409, detail="La sesión cambió de cuenta. Volvé a ingresar con la cuenta original de la ficha.")
