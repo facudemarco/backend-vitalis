@@ -17,6 +17,8 @@ def studies_ready_condition(patient_reference):
                     AND COALESCE((
                         SELECT sa.requires_report FROM studies_admin sa
                         WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR LOWER(TRIM(sa.name)) = CONCAT(LOWER(TRIM(s.study_type)), 's')
+                           OR LOWER(TRIM(s.study_type)) = CONCAT(LOWER(TRIM(sa.name)), 's')
                            OR (
                                LOWER(TRIM(s.study_type)) = 'analisis-clinico'
                                AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
@@ -79,6 +81,8 @@ def get_patient_study_completion_issues(db, patient_id):
                     SELECT sa.requires_report
                     FROM studies_admin sa
                     WHERE LOWER(TRIM(sa.name)) = LOWER(TRIM(s.study_type))
+                           OR LOWER(TRIM(sa.name)) = CONCAT(LOWER(TRIM(s.study_type)), 's')
+                           OR LOWER(TRIM(s.study_type)) = CONCAT(LOWER(TRIM(sa.name)), 's')
                        OR (
                            LOWER(TRIM(s.study_type)) = 'analisis-clinico'
                            AND LOWER(TRIM(sa.name)) = LOWER('Análisis clínicos de laboratorio')
