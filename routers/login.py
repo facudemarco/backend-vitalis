@@ -76,7 +76,7 @@ async def verify_current_token(request: Request):
     
 # A fresh six-hour work window is issued only after checking the patient and editor.
 def medical_session_response(response, user, patient_id, expected_user_id=None):
-    if not user.is_active or user.role not in ("admin", "professional"):
+    if not user.is_active or user.role not in ("admin", "professional", "secretary"):
         raise HTTPException(status_code=403, detail="No tenés permiso para editar fichas médicas.")
     if expected_user_id and str(user.id) != expected_user_id:
         raise HTTPException(status_code=409, detail="Ingresá con la misma cuenta con la que abriste esta ficha.")
